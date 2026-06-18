@@ -4,6 +4,8 @@ A desktop application that estimates where the user is looking on the selected d
 
 The application is built as an Electron + React transparent overlay with a Python / ONNX Runtime GPU inference backend.
 
+https://github.com/user-attachments/assets/b97dd35d-e361-4196-b06a-6925079ee355
+
 ## Setup
 
 Python is pinned to the 3.10.x series. This repository uses `.python-version` set to `3.10.12`.
