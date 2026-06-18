@@ -6,9 +6,13 @@ The application is built as an Electron + React transparent overlay with a Pytho
 
 **It would be possible to fully web-ify it by converting it to onnxruntime-web or LiteRT.js, but I haven't implemented it because it's too much trouble.**
 
-https://github.com/user-attachments/assets/7eff8143-2417-4459-8e63-de97868e3ff0
+- Tested on a 31.5-inch display - The display size can be changed using CLI parameters
 
-<img width="843" height="458" alt="image" src="https://github.com/user-attachments/assets/c3e192f0-9cb2-4ab8-ae31-9c93ce0647eb" />
+  https://github.com/user-attachments/assets/7eff8143-2417-4459-8e63-de97868e3ff0
+
+- Webcam and GPU only
+
+  <img width="843" height="458" alt="image" src="https://github.com/user-attachments/assets/c3e192f0-9cb2-4ab8-ae31-9c93ce0647eb" />
 
 ## Setup
 
