@@ -20,7 +20,7 @@ import onnxruntime as ort
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DEIM_MODEL = REPO_ROOT / "models" / "deimv2_dinov3_s_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.onnx"
 DEFAULT_RETINAFACE_MODEL = REPO_ROOT / "models" / "retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx"
-DEFAULT_GAZE_MODEL = REPO_ROOT / "models" / "generalizing_gaze_estimation_with_weak_supervision_from_synthetic_views_Nx3x160x160.onnx"
+DEFAULT_GAZE_MODEL = REPO_ROOT / "models" / "gaze_Nx3x160x160.onnx"
 DEFAULT_CALIBRATION_FILE = REPO_ROOT / ".gaze_calibration.json"
 
 HEAD_CLASS_ID = 7

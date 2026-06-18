@@ -18,7 +18,7 @@ Place the required models under `models/`.
 
 ```text
 models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
-models/generalizing_gaze_estimation_with_weak_supervision_from_synthetic_views_Nx3x160x160.onnx
+models/gaze_Nx3x160x160.onnx
 ```
 
 If you use DEIMv2 as the detector, also place this model under `models/`.
@@ -32,13 +32,13 @@ models/deimv2_dinov3_s_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.
 The default ONNX Runtime backend is TensorRT. If TensorRT is unavailable, the backend emits a warning and falls back to CUDA, then CPU.
 
 ```bash
-pnpm dev -- --backend tensorrt --calibrate
+pnpm dev -- --backend cuda --calibrate
 ```
 
 To explicitly use CUDA or CPU:
 
 ```bash
-pnpm dev -- --backend cuda --calibrate
+pnpm dev -- --backend tensorrt --calibrate
 pnpm dev -- --backend cpu --calibrate
 ```
 
