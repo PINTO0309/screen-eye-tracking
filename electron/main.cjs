@@ -93,7 +93,8 @@ function copyFileForRenderer(sourcePath, relativeDir) {
   } catch (error) {
     console.error(`Failed to copy renderer asset ${source} -> ${target}: ${error.message}`);
   }
-  return `${relativeDir}/${encodeURIComponent(path.basename(source))}`;
+  const prefix = useDevServer() ? "/" : "";
+  return `${prefix}${relativeDir}/${encodeURIComponent(path.basename(source))}`;
 }
 
 function copyModelForRenderer(modelPath) {
@@ -105,7 +106,7 @@ function copyRuntimeAssetsForRenderer(sourceDir, relativeDir, predicate) {
   for (const name of names) {
     copyFileForRenderer(path.join(sourceDir, name), relativeDir);
   }
-  return `${relativeDir}/`;
+  return `${useDevServer() ? "/" : ""}${relativeDir}/`;
 }
 
 function copyOnnxRuntimeAssetsForRenderer() {

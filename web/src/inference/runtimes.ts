@@ -33,7 +33,7 @@ export async function createRuntimeModels(config: WebInferenceConfig, accelerato
 async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: WebAccelerator): Promise<RuntimeModels> {
   const ort = await import("onnxruntime-web/webgpu");
   ort.env.wasm.numThreads = 1;
-  ort.env.wasm.wasmPaths = config.onnxWasmBaseUrl;
+  ort.env.wasm.wasmPaths = absoluteAssetUrl(config.onnxWasmBaseUrl);
   ort.env.logLevel = "error";
   const providers = [accelerator];
   const detector = await createOnnxSessionQueued(ort, config.retinafaceModelUrl, providers);
@@ -94,9 +94,13 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function absoluteAssetUrl(url: string): string {
+  return new URL(url, window.location.href).toString();
+}
+
 async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAccelerator): Promise<RuntimeModels> {
   const { Tensor, loadAndCompile, loadLiteRt } = await import("@litertjs/core");
-  await ensureLiteRtLoaded(loadLiteRt, config.liteRtWasmBaseUrl);
+  await ensureLiteRtLoaded(loadLiteRt, absoluteAssetUrl(config.liteRtWasmBaseUrl));
   const detector = await loadAndCompile(config.retinafaceModelUrl, { accelerator });
   let gaze: Awaited<ReturnType<typeof loadAndCompile>>;
   try {

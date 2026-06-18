@@ -229,3 +229,7 @@ demo_gaze_estimation.py
 node_modules/
 dist/
 .gaze_calibration.json
+public/runtime-assets/onnxruntime-web/*
+!public/runtime-assets/onnxruntime-web/.gitkeep
+public/runtime-assets/litert/*
+!public/runtime-assets/litert/.gitkeep
