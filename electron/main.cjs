@@ -1,8 +1,12 @@
 const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const repoRoot = path.resolve(__dirname, "..");
+const defaultCalibrationFile = path.join(repoRoot, ".gaze_calibration.json");
+const liteRtWasmDir = path.resolve(path.dirname(require.resolve("@litertjs/core")), "..", "wasm");
+const ortWasmDir = path.dirname(require.resolve("onnxruntime-web/wasm"));
 let mainWindow = null;
 let backendProcess = null;
 let selectedDisplay = null;
@@ -11,6 +15,25 @@ let rendererReady = false;
 let debugOverlay = false;
 let shapeOverlay = false;
 const pendingMessages = [];
+
+function appendGpuSwitches() {
+  app.commandLine.appendSwitch("ignore-gpu-blocklist");
+  app.commandLine.appendSwitch("enable-zero-copy");
+  app.commandLine.appendSwitch("disable-gpu-sandbox");
+  app.commandLine.appendSwitch("enable-unsafe-webgpu");
+  app.commandLine.appendSwitch("enable-webgpu-developer-features");
+  const features =
+    process.platform === "linux"
+      ? "Vulkan,WebGPU,WebGPUService"
+      : process.platform === "darwin"
+        ? "Metal,WebGPU,WebGPUService"
+        : "WebGPU,WebGPUService";
+  app.commandLine.appendSwitch("enable-features", features);
+  app.commandLine.appendSwitch("use-webgpu-adapter", "default");
+  app.commandLine.appendSwitch("disable-features", "UseSkiaRenderer,UseChromeOSDirectVideoDecoder");
+}
+
+appendGpuSwitches();
 
 function cliArgs() {
   const args = process.argv.slice(2);
@@ -29,6 +52,76 @@ function readOption(args, name, fallback) {
 
 function hasFlag(args, name) {
   return args.includes(name);
+}
+
+function readNumberOption(args, name, fallback) {
+  const value = Number.parseFloat(readOption(args, name, String(fallback)));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function resolveRuntime(args) {
+  const runtime = readOption(args, "--runtime", "python");
+  return ["python", "onnxweb", "litert"].includes(runtime) ? runtime : "python";
+}
+
+function resolveRepoPath(value) {
+  const raw = value || "";
+  return path.resolve(repoRoot, raw);
+}
+
+function useDevServer() {
+  return Boolean(process.env.VITE_DEV_SERVER_URL) || (!app.isPackaged && process.env.NODE_ENV !== "production");
+}
+
+function rendererStaticDir() {
+  return useDevServer() ? path.join(repoRoot, "public") : path.join(repoRoot, "dist");
+}
+
+function rendererModelDir() {
+  return path.join(rendererStaticDir(), "models");
+}
+
+function copyFileForRenderer(sourcePath, relativeDir) {
+  const source = path.resolve(sourcePath);
+  const targetDir = path.join(rendererStaticDir(), relativeDir);
+  const target = path.join(targetDir, path.basename(source));
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    if (source !== target) {
+      fs.copyFileSync(source, target);
+    }
+  } catch (error) {
+    console.error(`Failed to copy renderer asset ${source} -> ${target}: ${error.message}`);
+  }
+  return `${relativeDir}/${encodeURIComponent(path.basename(source))}`;
+}
+
+function copyModelForRenderer(modelPath) {
+  return copyFileForRenderer(modelPath, "models");
+}
+
+function copyRuntimeAssetsForRenderer(sourceDir, relativeDir, predicate) {
+  const names = fs.readdirSync(sourceDir).filter(predicate).sort();
+  for (const name of names) {
+    copyFileForRenderer(path.join(sourceDir, name), relativeDir);
+  }
+  return `${relativeDir}/`;
+}
+
+function copyOnnxRuntimeAssetsForRenderer() {
+  return copyRuntimeAssetsForRenderer(
+    ortWasmDir,
+    "runtime-assets/onnxruntime-web",
+    (name) => name.startsWith("ort-wasm-simd-threaded.") && (name.endsWith(".wasm") || name.endsWith(".mjs"))
+  );
+}
+
+function copyLiteRtRuntimeAssetsForRenderer() {
+  return copyRuntimeAssetsForRenderer(
+    liteRtWasmDir,
+    "runtime-assets/litert",
+    (name) => name.startsWith("litert_wasm_") && (name.endsWith(".wasm") || name.endsWith(".js"))
+  );
 }
 
 function backendArgs(args, displayBounds) {
@@ -74,12 +167,78 @@ function backendArgs(args, displayBounds) {
   return passthrough;
 }
 
+function webInferenceConfig(args, displayBounds, runtime) {
+  const detector = readOption(args, "--detector", "retinaface");
+  const calibrationFile = resolveRepoPath(readOption(args, "--calibration-file", defaultCalibrationFile));
+  const retinafaceModel = resolveRepoPath(
+    readOption(
+      args,
+      "--detector-model",
+      readOption(
+        args,
+        "--retinaface-model",
+        runtime === "litert"
+          ? "public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70_float32.tflite"
+          : "public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx"
+      )
+    )
+  );
+  const gazeModel = resolveRepoPath(
+    readOption(
+      args,
+      "--gaze-model",
+      runtime === "litert" ? "public/models/gaze_1x3x160x160_float32.tflite" : "public/models/gaze_1x3x160x160.onnx"
+    )
+  );
+  return {
+    runtime,
+    detector,
+    backend: readOption(args, "--backend", "tensorrt"),
+    camera: readOption(args, "--camera", "0"),
+    scoreThreshold: readNumberOption(args, "--score-threshold", 0.5),
+    displaySizeInch: readNumberOption(args, "--display-size-inch", 31.5),
+    displayWidth: displayBounds.width,
+    displayHeight: displayBounds.height,
+    calibrationFile,
+    retinafaceModel,
+    gazeModel,
+    retinafaceModelUrl: copyModelForRenderer(retinafaceModel),
+    gazeModelUrl: copyModelForRenderer(gazeModel),
+    onnxWasmBaseUrl: copyOnnxRuntimeAssetsForRenderer(),
+    liteRtWasmBaseUrl: copyLiteRtRuntimeAssetsForRenderer(),
+    smoothingAlpha: readNumberOption(args, "--smoothing-alpha", 0.65),
+    smoothingAlphaY: readNumberOption(args, "--smoothing-alpha-y", 0.45),
+    previewFps: readNumberOption(args, "--preview-fps", 8.0),
+    hidePreview: hasFlag(args, "--hide-preview"),
+    flipX: !hasFlag(args, "--no-flip-x"),
+    flipY: !hasFlag(args, "--no-flip-y"),
+    cameraScreenX: readNumberOption(args, "--camera-screen-x", 0.5),
+    cameraScreenY: readNumberOption(args, "--camera-screen-y", 0),
+    eyePositionWeightX: readNumberOption(args, "--eye-position-weight-x", 1),
+    eyePositionWeightY: readNumberOption(args, "--eye-position-weight-y", 0.25),
+    retinafaceHeadFaceRatio: readNumberOption(args, "--retinaface-head-face-ratio", 1.545),
+    gazeProjectionMode: readOption(args, "--gaze-projection-mode", "legacy")
+  };
+}
+
 function sendToRenderer(payload) {
+  if (payload && payload.type === "status" && (payload.level === "warning" || payload.level === "error")) {
+    const log = payload.level === "error" ? console.error : console.warn;
+    log(`[renderer-status:${payload.level}] ${payload.message}`);
+  }
   if (mainWindow && !mainWindow.isDestroyed() && rendererReady) {
     mainWindow.webContents.send("backend-message", payload);
   } else {
     pendingMessages.push(payload);
   }
+}
+
+function shouldSuppressRendererConsole(message) {
+  return (
+    message.includes("VerifyEachNodeIsAssignedToAnEp") ||
+    message.includes("Some nodes were not assigned to the preferred execution providers") ||
+    message.includes("Rerunning with verbose output on a non-minimal build will show node assignments")
+  );
 }
 
 function applyPassiveOverlayMode() {
@@ -107,6 +266,7 @@ function sanitizeOverlayRegions(regions) {
 
 function createWindow() {
   const args = cliArgs();
+  const runtime = resolveRuntime(args);
   const displays = screen.getAllDisplays().sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y);
   const displayIndexArg = readOption(args, "--display-index", null);
   const primaryDisplay = screen.getPrimaryDisplay();
@@ -126,13 +286,15 @@ function createWindow() {
 
   rendererConfig = {
     calibrate: hasFlag(args, "--calibrate"),
+    runtime,
     displayIndex: invalidDisplay ? 0 : requestedDisplayIndex,
     requestedDisplayIndex,
     displayCount: displays.length,
     displayBounds: bounds,
     invalidDisplay,
     cameraScreenX: Number.isFinite(cameraScreenX) ? Math.min(1, Math.max(0, cameraScreenX)) : 0.5,
-    cameraScreenY: Number.isFinite(cameraScreenY) ? Math.min(1, Math.max(0, cameraScreenY)) : 0
+    cameraScreenY: Number.isFinite(cameraScreenY) ? Math.min(1, Math.max(0, cameraScreenY)) : 0,
+    webInference: runtime === "python" ? null : webInferenceConfig(args, bounds, runtime)
   };
 
   mainWindow = new BrowserWindow({
@@ -155,6 +317,9 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+  mainWindow.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media");
   });
   mainWindow.setAlwaysOnTop(true, "screen-saver");
   applyPassiveOverlayMode();
@@ -186,6 +351,32 @@ function createWindow() {
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     console.error(`Renderer process gone: ${details.reason}`);
   });
+  mainWindow.webContents.on("console-message", (_event, levelOrDetails, messageArg, lineArg, sourceIdArg) => {
+    const details =
+      typeof levelOrDetails === "object" && levelOrDetails !== null
+        ? levelOrDetails
+        : {
+            level: levelOrDetails,
+            message: messageArg,
+            lineNumber: lineArg,
+            sourceId: sourceIdArg
+          };
+    const level = Number(details.level ?? 0);
+    const message = String(details.message ?? "");
+    if (shouldSuppressRendererConsole(message)) {
+      return;
+    }
+    const line = details.lineNumber ?? details.line ?? 0;
+    const sourceId = details.sourceId ?? "";
+    const prefix = sourceId ? `${sourceId}:${line}` : `renderer:${line}`;
+    if (level >= 3) {
+      console.error(`[renderer-console] ${prefix} ${message}`);
+    } else if (level === 2) {
+      console.warn(`[renderer-console] ${prefix} ${message}`);
+    } else {
+      console.log(`[renderer-console] ${prefix} ${message}`);
+    }
+  });
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -206,7 +397,24 @@ function createWindow() {
     });
   }
 
-  startBackend(args, bounds);
+  if (runtime === "python") {
+    startBackend(args, bounds);
+  } else {
+    sendToRenderer({
+      type: "status",
+      level: "info",
+      message: `Using ${runtime} runtime in Electron renderer`,
+      runtime
+    });
+    if (readOption(args, "--backend", null) !== null) {
+      sendToRenderer({
+        type: "status",
+        level: "warning",
+        message: `--backend is ignored by ${runtime} runtime`,
+        runtime
+      });
+    }
+  }
 }
 
 function startBackend(args, displayBounds) {
@@ -245,6 +453,29 @@ function startBackend(args, displayBounds) {
 
 ipcMain.handle("get-config", () => rendererConfig);
 
+ipcMain.handle("read-calibration", async (_event, filePath) => {
+  const resolved = resolveRepoPath(filePath || defaultCalibrationFile);
+  try {
+    const text = await fs.promises.readFile(resolved, "utf8");
+    return { ok: true, text };
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return { ok: true, text: null };
+    }
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.handle("write-calibration", async (_event, filePath, payload) => {
+  const resolved = resolveRepoPath(filePath || defaultCalibrationFile);
+  try {
+    await fs.promises.writeFile(resolved, JSON.stringify(payload, null, 2), "utf8");
+    return { ok: true, path: resolved };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
 ipcMain.on("renderer-ready", () => {
   rendererReady = true;
   while (pendingMessages.length > 0) {
@@ -275,7 +506,9 @@ ipcMain.on("overlay-regions", (_event, regions) => {
   applyPassiveOverlayMode();
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (backendProcess) {

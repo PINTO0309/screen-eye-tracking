@@ -4,6 +4,11 @@ declare global {
   interface Window {
     gazeBridge: {
       getConfig: () => Promise<RendererConfig>;
+      readCalibration: (path: string) => Promise<{ ok: true; text: string | null } | { ok: false; error: string }>;
+      writeCalibration: (
+        path: string,
+        payload: unknown
+      ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
       ready: () => void;
       setOverlayRegions: (regions: OverlayRegion[]) => void;
       onBackendMessage: (callback: (payload: BackendMessage) => void) => () => void;
@@ -33,9 +38,44 @@ export interface RendererConfig {
   invalidDisplay: boolean;
   cameraScreenX: number;
   cameraScreenY: number;
+  runtime: RuntimeName;
+  webInference: WebInferenceConfig | null;
 }
 
+export type RuntimeName = "python" | "onnxweb" | "litert";
 export type GazeProjectionMode = "legacy" | "binocular-screen" | "binocular-convergence";
+export type AcceleratorName = "webgpu" | "wasm";
+export type WebAccelerator = AcceleratorName;
+
+export interface WebInferenceConfig {
+  runtime: Exclude<RuntimeName, "python">;
+  detector: "retinaface" | "deim";
+  backend: string;
+  camera: string;
+  scoreThreshold: number;
+  displaySizeInch: number;
+  displayWidth: number;
+  displayHeight: number;
+  calibrationFile: string;
+  retinafaceModel: string;
+  gazeModel: string;
+  retinafaceModelUrl: string;
+  gazeModelUrl: string;
+  onnxWasmBaseUrl: string;
+  liteRtWasmBaseUrl: string;
+  smoothingAlpha: number;
+  smoothingAlphaY: number;
+  previewFps: number;
+  hidePreview: boolean;
+  flipX: boolean;
+  flipY: boolean;
+  cameraScreenX: number;
+  cameraScreenY: number;
+  eyePositionWeightX: number;
+  eyePositionWeightY: number;
+  retinafaceHeadFaceRatio: number;
+  gazeProjectionMode: GazeProjectionMode;
+}
 
 export type BackendMessage =
   | {
@@ -57,6 +97,9 @@ export type BackendMessage =
       type: "status";
       level: "info" | "warning" | "error";
       message: string;
+      runtime?: RuntimeName;
+      accelerator?: AcceleratorName;
+      logged?: boolean;
       detector?: string;
       detector_model?: string;
       detector_providers?: string[];
