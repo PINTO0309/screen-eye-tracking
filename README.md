@@ -34,7 +34,13 @@ models/deimv2_dinov3_s_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.
 The default ONNX Runtime backend is TensorRT. If TensorRT is unavailable, the backend emits a warning and falls back to CUDA, then CPU.
 
 ```bash
+# Recommended
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-screen
+# Selecting the gaze estimation mode
 pnpm dev -- --backend cuda --calibrate
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode legacy
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-screen
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-convergence
 ```
 
 To explicitly use CUDA or CPU:
@@ -88,12 +94,22 @@ pnpm dev -- \
 - `--eye-position-weight-x`: Weight for the parallel translation correction from the face/eye bbox X position. Default: `1.0`.
 - `--eye-position-weight-y`: Weight for the parallel translation correction from the face/eye bbox Y position. Default: `0.25`. Lower this if posture changes make the marker stick to the top or bottom edge.
 - `--retinaface-head-face-ratio`: Static ratio used with RetinaFace to convert Face width to Head-equivalent width. Default: `1.545`.
+- `--gaze-projection-mode legacy|binocular-screen|binocular-convergence`: Screen projection mode. Default: `legacy`.
 
 If vertical tracking feels too slow while horizontal tracking is acceptable, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`.
 
 The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green and Eye detections are drawn in yellow. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
 
 When RetinaFace is used, distance estimation still needs the `16cm` Head-width assumption used by DEIMv2 Head detection. RetinaFace Face width is narrower than Head width, so the static source constant `RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545` converts Face width to Head-equivalent width before distance estimation. The current ratio is shown in the lower-right status area and the PiP preview.
+
+Experimental binocular projection modes can be selected with `--gaze-projection-mode`. `legacy` keeps the original behavior, averaging the left/right eye gaze angles before projection. `binocular-screen` projects each eye separately to the screen plane and averages the two hit points. `binocular-convergence` estimates the closest point between the left/right gaze rays and uses that point as the screen hit position; if the rays are unstable, it falls back to `legacy`.
+
+These binocular modes are approximations from the model's per-eye yaw/pitch and 2D eye positions, not a true optical vergence measurement. Because the raw point distribution can change between modes, use a separate calibration file when comparing them:
+
+```bash
+pnpm dev -- --gaze-projection-mode binocular-screen --calibration-file .gaze_calibration.binocular-screen.json
+pnpm dev -- --gaze-projection-mode binocular-convergence --calibration-file .gaze_calibration.binocular-convergence.json
+```
 
 To use DEIMv2 Eye detection:
 
@@ -137,6 +153,7 @@ If the marker sticks to a screen edge after calibration when your face moves up 
 - Adult average Head width is assumed to be `16cm`. The eye-to-display distance is estimated from the detected face/head bbox width.
 - With RetinaFace, Face width is converted to Head-equivalent width using the static Head/Face ratio `1.545`.
 - By default, RetinaFace left/right eye landmarks are used to compute the gaze-model crop center.
+- `--gaze-projection-mode binocular-screen` and `binocular-convergence` use left/right gaze angles separately; they are experimental approximations and should be calibrated separately from `legacy`.
 - With `--detector deim`, the top two DEIMv2 class id `17` Eye detections are used.
 
 ## Known Limitations

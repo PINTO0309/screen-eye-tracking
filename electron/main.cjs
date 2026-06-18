@@ -51,7 +51,8 @@ function backendArgs(args, displayBounds) {
     "--camera-screen-y",
     "--eye-position-weight-x",
     "--eye-position-weight-y",
-    "--retinaface-head-face-ratio"
+    "--retinaface-head-face-ratio",
+    "--gaze-projection-mode"
   ];
   for (const option of options) {
     const value = readOption(args, option, null);

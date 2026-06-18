@@ -72,6 +72,22 @@ class DisplayGeometry:
         )
 
 
+@dataclass(frozen=True)
+class GazeEstimate:
+    yaw_deg: float
+    pitch_deg: float
+    left_yaw_deg: float
+    left_pitch_deg: float
+    right_yaw_deg: float
+    right_pitch_deg: float
+
+
+@dataclass(frozen=True)
+class ProjectionResult:
+    point: tuple[float, float]
+    fallback_reason: str | None = None
+
+
 def emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
@@ -378,7 +394,7 @@ class GazeEstimator:
         if self.output.name != "output" or list(self.output.shape[1:]) != [962, 3]:
             raise RuntimeError(f"Unexpected gaze model output: {self.output.name} {self.output.shape}")
 
-    def estimate(self, frame: np.ndarray, head: Detection, eyes: list[Detection]) -> tuple[float, float]:
+    def estimate(self, frame: np.ndarray, head: Detection, eyes: list[Detection]) -> GazeEstimate:
         if len(eyes) < 2:
             raise ValueError("Two eye detections are required")
         left_eye, right_eye = eyes[0], eyes[1]
@@ -400,9 +416,20 @@ class GazeEstimator:
             eye[:, [0, 1]] = eye[:, [1, 0]]
         theta_x_l, theta_y_l, _ = angles_and_vec_from_eye(eye_l)
         theta_x_r, theta_y_r, _ = angles_and_vec_from_eye(eye_r)
-        yaw_deg = ((theta_y_l + theta_y_r) * 0.5) * 180.0 / math.pi
-        pitch_deg = -((theta_x_l + theta_x_r) * 0.5) * 180.0 / math.pi
-        return float(yaw_deg), float(pitch_deg)
+        left_yaw_deg = theta_y_l * 180.0 / math.pi
+        left_pitch_deg = -theta_x_l * 180.0 / math.pi
+        right_yaw_deg = theta_y_r * 180.0 / math.pi
+        right_pitch_deg = -theta_x_r * 180.0 / math.pi
+        yaw_deg = (left_yaw_deg + right_yaw_deg) * 0.5
+        pitch_deg = (left_pitch_deg + right_pitch_deg) * 0.5
+        return GazeEstimate(
+            yaw_deg=float(yaw_deg),
+            pitch_deg=float(pitch_deg),
+            left_yaw_deg=float(left_yaw_deg),
+            left_pitch_deg=float(left_pitch_deg),
+            right_yaw_deg=float(right_yaw_deg),
+            right_pitch_deg=float(right_pitch_deg),
+        )
 
 
 class Calibration:
@@ -524,18 +551,129 @@ class ScreenProjector:
         pitch_deg: float,
         distance_m: float,
     ) -> tuple[float, float]:
+        return self._normalize_hit_m(self._screen_hit_m(eye_center_px, yaw_deg, pitch_deg, distance_m))
+
+    def project_estimate(
+        self,
+        mode: str,
+        eyes: list[Detection],
+        estimate: GazeEstimate,
+        distance_m: float,
+    ) -> ProjectionResult:
+        eye_center = (
+            (eyes[0].center[0] + eyes[1].center[0]) * 0.5,
+            (eyes[0].center[1] + eyes[1].center[1]) * 0.5,
+        )
+        legacy = self.project(eye_center, estimate.yaw_deg, estimate.pitch_deg, distance_m)
+        if mode == "legacy":
+            return ProjectionResult(legacy)
+        if mode == "binocular-screen":
+            left_hit = self._screen_hit_m(eyes[0].center, estimate.left_yaw_deg, estimate.left_pitch_deg, distance_m)
+            right_hit = self._screen_hit_m(eyes[1].center, estimate.right_yaw_deg, estimate.right_pitch_deg, distance_m)
+            hit = ((left_hit[0] + right_hit[0]) * 0.5, (left_hit[1] + right_hit[1]) * 0.5)
+            if math.isfinite(hit[0]) and math.isfinite(hit[1]):
+                return ProjectionResult(self._normalize_hit_m(hit))
+            return ProjectionResult(legacy, "binocular-screen produced a non-finite hit point")
+        if mode == "binocular-convergence":
+            convergence = self._convergence_hit_m(
+                eyes[0].center,
+                estimate.left_yaw_deg,
+                estimate.left_pitch_deg,
+                eyes[1].center,
+                estimate.right_yaw_deg,
+                estimate.right_pitch_deg,
+                distance_m,
+            )
+            if isinstance(convergence, str):
+                return ProjectionResult(legacy, convergence)
+            return ProjectionResult(self._normalize_hit_m(convergence))
+        return ProjectionResult(legacy, f"Unsupported gaze projection mode: {mode}")
+
+    def _eye_origin_m(self, eye_center_px: tuple[float, float], distance_m: float) -> tuple[float, float]:
         display_w_m, display_h_m = self.display.size_m
         eye_x_m = (eye_center_px[0] - CAMERA_WIDTH * 0.5) * distance_m / self.focal_px * self.eye_position_weight_x
         eye_y_m = (eye_center_px[1] - CAMERA_HEIGHT * 0.5) * distance_m / self.focal_px * self.eye_position_weight_y
-        hit_x_m = display_w_m * self.camera_screen_x + eye_x_m + math.tan(math.radians(yaw_deg)) * distance_m
+        return display_w_m * self.camera_screen_x + eye_x_m, display_h_m * self.camera_screen_y + eye_y_m
+
+    def _screen_hit_m(
+        self,
+        eye_center_px: tuple[float, float],
+        yaw_deg: float,
+        pitch_deg: float,
+        distance_m: float,
+    ) -> tuple[float, float]:
+        eye_x_m, eye_y_m = self._eye_origin_m(eye_center_px, distance_m)
+        hit_x_m = eye_x_m + math.tan(math.radians(yaw_deg)) * distance_m
         pitch_y_m = math.tan(math.radians(pitch_deg)) * distance_m
         if self.flip_y:
             pitch_y_m = -pitch_y_m
-        hit_y_m = display_h_m * self.camera_screen_y + eye_y_m + pitch_y_m
+        hit_y_m = eye_y_m + pitch_y_m
+        return hit_x_m, hit_y_m
+
+    def _normalize_hit_m(self, hit_m: tuple[float, float]) -> tuple[float, float]:
+        display_w_m, display_h_m = self.display.size_m
+        hit_x_m, hit_y_m = hit_m
         x_norm = clamp01(hit_x_m / display_w_m)
         if self.flip_x:
             x_norm = 1.0 - x_norm
         return x_norm, clamp01(hit_y_m / display_h_m)
+
+    def _gaze_direction(self, yaw_deg: float, pitch_deg: float) -> np.ndarray:
+        pitch_tan = math.tan(math.radians(pitch_deg))
+        if self.flip_y:
+            pitch_tan = -pitch_tan
+        direction = np.asarray([math.tan(math.radians(yaw_deg)), pitch_tan, 1.0], dtype=np.float64)
+        norm = np.linalg.norm(direction)
+        if not math.isfinite(float(norm)) or norm <= 1.0e-9:
+            raise ValueError("Invalid gaze direction")
+        return direction / norm
+
+    def _convergence_hit_m(
+        self,
+        left_center_px: tuple[float, float],
+        left_yaw_deg: float,
+        left_pitch_deg: float,
+        right_center_px: tuple[float, float],
+        right_yaw_deg: float,
+        right_pitch_deg: float,
+        distance_m: float,
+    ) -> tuple[float, float] | str:
+        try:
+            left_origin_xy = self._eye_origin_m(left_center_px, distance_m)
+            right_origin_xy = self._eye_origin_m(right_center_px, distance_m)
+            p1 = np.asarray([left_origin_xy[0], left_origin_xy[1], 0.0], dtype=np.float64)
+            p2 = np.asarray([right_origin_xy[0], right_origin_xy[1], 0.0], dtype=np.float64)
+            d1 = self._gaze_direction(left_yaw_deg, left_pitch_deg)
+            d2 = self._gaze_direction(right_yaw_deg, right_pitch_deg)
+        except ValueError as exc:
+            return str(exc)
+
+        b = float(np.dot(d1, d2))
+        denom = 1.0 - b * b
+        if denom <= 1.0e-6:
+            return "binocular-convergence rays are nearly parallel"
+
+        w0 = p1 - p2
+        d = float(np.dot(d1, w0))
+        e = float(np.dot(d2, w0))
+        t = (b * e - d) / denom
+        u = (e - b * d) / denom
+        if t <= 0.0 or u <= 0.0:
+            return "binocular-convergence intersection is behind the eye plane"
+
+        closest_left = p1 + t * d1
+        closest_right = p2 + u * d2
+        closest_distance = float(np.linalg.norm(closest_left - closest_right))
+        max_closest_distance = 0.20
+        if closest_distance > max_closest_distance:
+            return "binocular-convergence rays do not meet closely"
+
+        midpoint = (closest_left + closest_right) * 0.5
+        if not np.all(np.isfinite(midpoint)):
+            return "binocular-convergence produced a non-finite point"
+        if midpoint[2] <= 0.0 or midpoint[2] > distance_m * 3.0:
+            return "binocular-convergence depth is outside the expected range"
+        return float(midpoint[0]), float(midpoint[1])
 
 
 def display_size_arg(value: str) -> float:
@@ -571,6 +709,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eye-position-weight-x", type=float, default=1.0)
     parser.add_argument("--eye-position-weight-y", type=float, default=0.25)
     parser.add_argument("--retinaface-head-face-ratio", type=float, default=RETINAFACE_HEAD_FACE_WIDTH_RATIO)
+    parser.add_argument(
+        "--gaze-projection-mode",
+        choices=["legacy", "binocular-screen", "binocular-convergence"],
+        default="legacy",
+    )
     return parser.parse_args()
 
 
@@ -637,6 +780,7 @@ def main() -> None:
             "camera_screen_y": projector.camera_screen_y,
             "eye_position_weight_x": projector.eye_position_weight_x,
             "eye_position_weight_y": projector.eye_position_weight_y,
+            "gaze_projection_mode": args.gaze_projection_mode,
             "gaze_providers": gaze.providers,
         }
     )
@@ -654,6 +798,7 @@ def main() -> None:
     latest_raw: tuple[float, float] | None = None
     last_status = 0.0
     last_preview = 0.0
+    last_projection_warning = 0.0
     preview_interval = 1.0 / max(0.5, args.preview_fps)
 
     try:
@@ -690,7 +835,7 @@ def main() -> None:
                     raise ValueError("Head was not detected")
                 if len(eyes) < 2:
                     raise ValueError("Two eyes were not detected")
-                yaw_deg, pitch_deg = gaze.estimate(frame, head, eyes)
+                gaze_estimate = gaze.estimate(frame, head, eyes)
                 if should_emit_preview:
                     emit_preview(
                         frame,
@@ -698,15 +843,22 @@ def main() -> None:
                         eyes,
                         None,
                         head_face_width_ratio if args.detector == "retinaface" else None,
-                        (yaw_deg, pitch_deg),
+                        (gaze_estimate.yaw_deg, gaze_estimate.pitch_deg),
                     )
                     last_preview = now
-                eye_center = (
-                    (eyes[0].center[0] + eyes[1].center[0]) * 0.5,
-                    (eyes[0].center[1] + eyes[1].center[1]) * 0.5,
-                )
                 distance_m = projector.distance_from_head(head, width_ratio=head_face_width_ratio)
-                raw = projector.project(eye_center, yaw_deg, pitch_deg, distance_m)
+                projection = projector.project_estimate(args.gaze_projection_mode, eyes, gaze_estimate, distance_m)
+                if projection.fallback_reason is not None and now - last_projection_warning > 2.0:
+                    emit(
+                        {
+                            "type": "status",
+                            "level": "warning",
+                            "message": f"{projection.fallback_reason}; falling back to legacy projection",
+                            "gaze_projection_mode": args.gaze_projection_mode,
+                        }
+                    )
+                    last_projection_warning = now
+                raw = projection.point
                 latest_raw = raw
                 corrected = calibration.apply(raw)
                 if smoothed is None:
@@ -731,8 +883,9 @@ def main() -> None:
                         "head_face_width_ratio": head_face_width_ratio,
                         "eye_position_weight_x": projector.eye_position_weight_x,
                         "eye_position_weight_y": projector.eye_position_weight_y,
-                        "yaw_deg": yaw_deg,
-                        "pitch_deg": pitch_deg,
+                        "gaze_projection_mode": args.gaze_projection_mode,
+                        "yaw_deg": gaze_estimate.yaw_deg,
+                        "pitch_deg": gaze_estimate.pitch_deg,
                     }
                 )
             except Exception as exc:

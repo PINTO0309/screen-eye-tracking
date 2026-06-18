@@ -245,6 +245,7 @@ function App() {
             Eye pos weight x {gaze.eye_position_weight_x?.toFixed(2)} / y {gaze.eye_position_weight_y.toFixed(2)}
           </div>
         )}
+        {gaze?.gaze_projection_mode && <div>Projection {gaze.gaze_projection_mode}</div>}
         {config && (
           <div>
             display {config.displayIndex + 1}/{config.displayCount}

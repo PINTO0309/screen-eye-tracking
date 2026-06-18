@@ -35,6 +35,8 @@ export interface RendererConfig {
   cameraScreenY: number;
 }
 
+export type GazeProjectionMode = "legacy" | "binocular-screen" | "binocular-convergence";
+
 export type BackendMessage =
   | {
       type: "gaze";
@@ -47,6 +49,7 @@ export type BackendMessage =
       head_face_width_ratio?: number;
       eye_position_weight_x?: number;
       eye_position_weight_y?: number;
+      gaze_projection_mode?: GazeProjectionMode;
       yaw_deg: number;
       pitch_deg: number;
     }
@@ -62,6 +65,7 @@ export type BackendMessage =
       camera_screen_y?: number;
       eye_position_weight_x?: number;
       eye_position_weight_y?: number;
+      gaze_projection_mode?: GazeProjectionMode;
       gaze_providers?: string[];
     }
   | {
