@@ -2,9 +2,7 @@
 
 A desktop application that estimates where the user is looking on the selected display and renders a red gaze marker at the estimated hit position. It uses RetinaFace or DEIMv2 Wholebody49 for eye position detection and an ONNX gaze model for gaze estimation.
 
-The application is built as an Electron + React transparent overlay with a Python / ONNX Runtime GPU inference backend.
-
-**It would be possible to fully web-ify it by converting it to onnxruntime-web or LiteRT.js, but I haven't implemented it because it's too much trouble.**
+The application is built as an Electron + React transparent overlay. It can run inference through the original Python / ONNX Runtime GPU backend, or fully inside Electron renderer with onnxruntime-web or LiteRT.js.
 
 - Tested on a 31.5-inch display - The display size can be changed using CLI parameters
 
@@ -24,17 +22,30 @@ source .venv/bin/activate
 pnpm install
 ```
 
-Place the required models under `models/`.
+Place the required models under `public/models/`.
 
 ```text
-models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
-models/gaze_Nx3x160x160.onnx
+public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
+public/models/gaze_Nx3x160x160.onnx
 ```
 
-If you use DEIMv2 as the detector, also place this model under `models/`.
+For `--runtime onnxweb`, also place:
 
 ```text
-models/deimv2_dinov3_s_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.onnx
+public/models/gaze_1x3x160x160.onnx
+```
+
+For `--runtime litert`, also place:
+
+```text
+public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70_float32.tflite
+public/models/gaze_1x3x160x160_float32.tflite
+```
+
+If you use DEIMv2 as the detector, also place this model under `public/models/`.
+
+```text
+public/models/deimv2_dinov3_x_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.onnx
 ```
 
 ## Run
@@ -58,6 +69,19 @@ pnpm dev -- --backend tensorrt --calibrate
 pnpm dev -- --backend cpu --calibrate
 ```
 
+To run inference fully in Electron without starting Python:
+
+```bash
+# Recommended: onnxruntime-web
+pnpm dev -- --runtime onnxweb --calibrate --gaze-projection-mode binocular-screen
+# Not recommended: LiteRT.js
+# WebGPU isn't working properly, so it falls back to WASM, which makes it very slow.
+pnpm dev -- --runtime litert --calibrate --gaze-projection-mode binocular-screen
+```
+
+The web runtimes try WebGPU first. If model loading fails, they reload both models with wasm.
+When a web runtime is selected, Electron uses the selected model files in `public/models/` during dev runs and copies them to `dist/models/` for production runs. It also copies the required runtime wasm assets from `node_modules/` to `public/` during dev runs, or to `dist/` for production runs. The renderer loads both models and wasm assets as normal public assets.
+
 To build and run:
 
 ```bash
@@ -70,6 +94,7 @@ pnpm start -- --backend tensorrt --calibrate
 ```bash
 pnpm dev -- \
 --backend tensorrt \
+--runtime python \
 --detector retinaface \
 --display-index 0 \
 --display-size-inch 31.5 \
@@ -78,16 +103,17 @@ pnpm dev -- \
 --preview-fps 8
 ```
 
-- `--backend tensorrt|cuda|cpu`: ONNX Runtime execution backend. Default: `tensorrt`.
+- `--runtime python|onnxweb|litert`: Inference runtime. Default: `python`. `onnxweb` and `litert` never start the Python process.
+- `--backend tensorrt|cuda|cpu`: Python ONNX Runtime execution backend. Default: `tensorrt`. Ignored by web runtimes.
 - `--detector retinaface|deim`: Eye position detector. Default: `retinaface`.
-- `--retinaface-model`: RetinaFace model path. Default: `models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx`.
+- `--retinaface-model`: RetinaFace model path. Default: `public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx`.
 - `--deim-model`: DEIMv2 model path. Used when `--detector deim` is selected.
 - `--detector-model`: Directly overrides the selected detector model path.
 - `--display-index`: Target monitor index for the overlay marker. This uses the display order reported by Electron.
 - `--debug-overlay`: Starts as a normal opaque window instead of a transparent overlay and opens DevTools.
 - `--shape-overlay`: On Linux/Windows, restricts the transparent window shape to the visible overlay elements. This is a fallback for environments where normal click-through does not work. Do not use it if the gaze marker flickers.
 - `--display-size-inch`: Target monitor diagonal size. Choices are `18, 19, ..., 31, 31.5, 32`. Default: `31.5`.
-- `--camera`: OpenCV camera index or video path. Default: `0`.
+- `--camera`: Python runtime uses an OpenCV camera index or video path. Web runtimes use a browser video input index or `deviceId`. Default: `0`.
 - `--score-threshold`: Head/Eye detection score threshold.
 - `--calibration-file`: Path for the 5-point calibration result. Default: `.gaze_calibration.json`.
 - `--calibrate`: Runs 5-point calibration.
@@ -124,6 +150,8 @@ To use DEIMv2 Eye detection:
 ```bash
 pnpm dev -- --backend cuda --detector deim
 ```
+
+DEIMv2 is supported only by `--runtime python`. The web runtimes currently support RetinaFace only.
 
 ## If Nothing Appears
 

@@ -19,6 +19,10 @@ if (build.status !== 0) {
 const electron = spawnSync(electronBin, [".", ...args], {
   cwd: repoRoot,
   stdio: "inherit",
+  env: {
+    ...process.env,
+    NODE_ENV: "production"
+  },
   shell: process.platform === "win32"
 });
 

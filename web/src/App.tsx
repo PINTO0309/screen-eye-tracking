@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { BackendMessage, OverlayRegion, RendererConfig } from "./global";
+import type { AcceleratorName, BackendMessage, OverlayRegion, RendererConfig, RuntimeName } from "./global";
+import { startWebRuntime, type WebRuntimeController } from "./inference/webRuntime";
+import { logStatus } from "./logger";
 import "./styles.css";
 
 type GazeState = Extract<BackendMessage, { type: "gaze" }> & {
@@ -9,6 +11,16 @@ type GazeState = Extract<BackendMessage, { type: "gaze" }> & {
 
 type PreviewState = Extract<BackendMessage, { type: "preview" }> & {
   receivedAt: number;
+};
+
+type ModelRuntimeState = {
+  detector?: ModelRuntimeInfo;
+  gaze?: ModelRuntimeInfo;
+};
+
+type ModelRuntimeInfo = {
+  runtime: RuntimeName;
+  accelerator: string;
 };
 
 const calibrationPoints: [number, number][] = [
@@ -21,12 +33,47 @@ const calibrationPoints: [number, number][] = [
 const calibrationTargetDurationMs = 1900;
 const calibrationCaptureDelayMs = 1800;
 
+function providerToAccelerator(provider: string | undefined): string {
+  if (!provider) {
+    return "unknown";
+  }
+  const normalized = provider.toLowerCase();
+  if (normalized.includes("tensorrt")) {
+    return "tensorrt";
+  }
+  if (normalized.includes("cuda")) {
+    return "cuda";
+  }
+  if (normalized.includes("cpu")) {
+    return "cpu";
+  }
+  if (normalized.includes("webgpu")) {
+    return "webgpu";
+  }
+  if (normalized.includes("wasm")) {
+    return "wasm";
+  }
+  return provider.replace(/ExecutionProvider$/u, "");
+}
+
+function statusRuntime(payload: Extract<BackendMessage, { type: "status" }>, config: RendererConfig | null): RuntimeName {
+  return payload.runtime ?? config?.runtime ?? "python";
+}
+
+function statusAccelerator(
+  payload: Extract<BackendMessage, { type: "status" }>,
+  providers: string[] | undefined
+): AcceleratorName | string {
+  return payload.accelerator ?? providerToAccelerator(providers?.[0]);
+}
+
 function App() {
   const [config, setConfig] = useState<RendererConfig | null>(null);
   const [gaze, setGaze] = useState<GazeState | null>(null);
   const [status, setStatus] = useState("starting");
   const [statusLevel, setStatusLevel] = useState<"info" | "warning" | "error">("info");
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [modelRuntime, setModelRuntime] = useState<ModelRuntimeState>({});
   const [calibrationCountdown, setCalibrationCountdown] = useState<number | null>(null);
   const [calibrationIndex, setCalibrationIndex] = useState<number | null>(null);
   const [calibrationDone, setCalibrationDone] = useState(false);
@@ -38,32 +85,93 @@ function App() {
   const calibrationTargetRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
   const statusRef = useRef<HTMLElement>(null);
+  const webRuntimeRef = useRef<WebRuntimeController | null>(null);
+  const webRuntimeStartingRef = useRef(false);
+  const configRef = useRef<RendererConfig | null>(null);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  const handleBackendMessage = useCallback((payload: BackendMessage) => {
+    if (payload.type === "gaze") {
+      setGaze({ ...payload, receivedAt: Date.now() });
+      setStatus("tracking");
+      setStatusLevel("info");
+    } else if (payload.type === "status") {
+      if (!payload.logged) {
+        logStatus(payload);
+      }
+      setStatus(payload.message);
+      setStatusLevel(payload.level);
+      if (payload.detector_providers || payload.gaze_providers) {
+        setModelRuntime((current) => ({
+          detector: payload.detector_providers
+            ? {
+                runtime: statusRuntime(payload, configRef.current),
+                accelerator: statusAccelerator(payload, payload.detector_providers)
+              }
+            : current.detector,
+          gaze: payload.gaze_providers
+            ? {
+                runtime: statusRuntime(payload, configRef.current),
+                accelerator: statusAccelerator(payload, payload.gaze_providers)
+              }
+            : current.gaze
+        }));
+      }
+    } else if (payload.type === "preview") {
+      setPreview({ ...payload, receivedAt: Date.now() });
+    } else if (payload.type === "calibration") {
+      setStatus(`calibration: ${payload.status}${payload.count ? ` ${payload.count}/5` : ""}`);
+      setStatusLevel(payload.status === "saved" ? "info" : "warning");
+      if (payload.status === "saved") {
+        setCalibrationDone(true);
+        setCalibrationCountdown(null);
+        setCalibrationIndex(null);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     window.gazeBridge.getConfig().then(setConfig);
-    const unsubscribe = window.gazeBridge.onBackendMessage((payload) => {
-      if (payload.type === "gaze") {
-        setGaze({ ...payload, receivedAt: Date.now() });
-        setStatus("tracking");
-        setStatusLevel("info");
-      } else if (payload.type === "status") {
-        setStatus(payload.message);
-        setStatusLevel(payload.level);
-      } else if (payload.type === "preview") {
-        setPreview({ ...payload, receivedAt: Date.now() });
-      } else if (payload.type === "calibration") {
-        setStatus(`calibration: ${payload.status}${payload.count ? ` ${payload.count}/5` : ""}`);
-        setStatusLevel(payload.status === "saved" ? "info" : "warning");
-        if (payload.status === "saved") {
-          setCalibrationDone(true);
-          setCalibrationCountdown(null);
-          setCalibrationIndex(null);
-        }
-      }
-    });
+    const unsubscribe = window.gazeBridge.onBackendMessage(handleBackendMessage);
     window.gazeBridge.ready();
     return unsubscribe;
-  }, []);
+  }, [handleBackendMessage]);
+
+  useEffect(() => {
+    if (!config?.webInference || webRuntimeRef.current || webRuntimeStartingRef.current) {
+      return;
+    }
+    let cancelled = false;
+    webRuntimeStartingRef.current = true;
+    startWebRuntime(config.webInference, handleBackendMessage)
+      .then((runtime) => {
+        webRuntimeStartingRef.current = false;
+        if (cancelled) {
+          runtime.stop();
+          return;
+        }
+        webRuntimeRef.current = runtime;
+      })
+      .catch((error) => {
+        webRuntimeStartingRef.current = false;
+        console.error("Failed to start web runtime", error);
+        handleBackendMessage({
+          type: "status",
+          level: "error",
+          message: error instanceof Error ? error.message : String(error),
+          runtime: config.webInference?.runtime
+        });
+      });
+    return () => {
+      cancelled = true;
+      webRuntimeStartingRef.current = false;
+      webRuntimeRef.current?.stop();
+      webRuntimeRef.current = null;
+    };
+  }, [config?.webInference, handleBackendMessage]);
 
   useEffect(() => {
     if (!config?.calibrate || calibrationDone) {
@@ -92,11 +200,35 @@ function App() {
     if (calibrationIndex === null || calibrationIndex >= calibrationPoints.length) {
       return;
     }
+    console.info("Calibration target shown", JSON.stringify({
+      index: calibrationIndex,
+      target: calibrationPoints[calibrationIndex]
+    }));
     const captureTimer = window.setTimeout(() => {
-      window.gazeBridge.sendCalibrationCapture(calibrationPoints[calibrationIndex]);
+      console.info("Calibration capture timer fired", JSON.stringify({
+        index: calibrationIndex,
+        target: calibrationPoints[calibrationIndex]
+      }));
+      if (config?.runtime === "python") {
+        window.gazeBridge.sendCalibrationCapture(calibrationPoints[calibrationIndex]);
+      } else {
+        webRuntimeRef.current?.captureCalibration(calibrationPoints[calibrationIndex]).catch((error) => {
+          console.error("Calibration capture failed", error);
+          handleBackendMessage({
+            type: "status",
+            level: "error",
+            message: error instanceof Error ? error.message : String(error),
+            runtime: config?.runtime
+          });
+        });
+      }
     }, calibrationCaptureDelayMs);
     const nextTimer = window.setTimeout(() => {
       if (calibrationIndex + 1 < calibrationPoints.length) {
+        console.info("Calibration target advancing", JSON.stringify({
+          from: calibrationIndex,
+          to: calibrationIndex + 1
+        }));
         setCalibrationIndex(calibrationIndex + 1);
       }
     }, calibrationTargetDurationMs);
@@ -104,7 +236,7 @@ function App() {
       window.clearTimeout(captureTimer);
       window.clearTimeout(nextTimer);
     };
-  }, [calibrationIndex]);
+  }, [calibrationIndex, config?.runtime, handleBackendMessage]);
 
   const dotStyle = useMemo(() => {
     if (!gaze || Date.now() - gaze.receivedAt > 1500) {
@@ -161,7 +293,9 @@ function App() {
       addElement(calibrationCenterArrowsRef.current, 28);
       addElement(calibrationTargetRef.current, 18);
       addElement(previewRef.current, 24);
-      addElement(statusRef.current, 18);
+      if (!calibrationActive) {
+        addElement(statusRef.current, 18);
+      }
       window.gazeBridge.setOverlayRegions(regions);
     };
 
@@ -228,30 +362,42 @@ function App() {
           </div>
         </aside>
       )}
-      <section ref={statusRef} className={`status ${statusLevel}`}>
-        <div>{status}</div>
-        {gaze && (
-          <div>
-            d {gaze.distance_m.toFixed(2)}m / yaw {gaze.yaw_deg.toFixed(1)} / pitch {gaze.pitch_deg.toFixed(1)}
-          </div>
-        )}
-        {gaze?.head_face_width_ratio && (
-          <div>
-            Head/Face {gaze.head_face_width_ratio.toFixed(3)}x
-          </div>
-        )}
-        {gaze?.eye_position_weight_y !== undefined && (
-          <div>
-            Eye pos weight x {gaze.eye_position_weight_x?.toFixed(2)} / y {gaze.eye_position_weight_y.toFixed(2)}
-          </div>
-        )}
-        {gaze?.gaze_projection_mode && <div>Projection {gaze.gaze_projection_mode}</div>}
-        {config && (
-          <div>
-            display {config.displayIndex + 1}/{config.displayCount}
-          </div>
-        )}
-      </section>
+      {!calibrationActive && (
+        <section ref={statusRef} className={`status ${statusLevel}`}>
+          <div>{status}</div>
+          {gaze && (
+            <div>
+              d {gaze.distance_m.toFixed(2)}m / yaw {gaze.yaw_deg.toFixed(1)} / pitch {gaze.pitch_deg.toFixed(1)}
+            </div>
+          )}
+          {gaze?.head_face_width_ratio && (
+            <div>
+              Head/Face {gaze.head_face_width_ratio.toFixed(3)}x
+            </div>
+          )}
+          {gaze?.eye_position_weight_y !== undefined && (
+            <div>
+              Eye pos weight x {gaze.eye_position_weight_x?.toFixed(2)} / y {gaze.eye_position_weight_y.toFixed(2)}
+            </div>
+          )}
+          {gaze?.gaze_projection_mode && <div>Projection {gaze.gaze_projection_mode}</div>}
+          {modelRuntime.detector && (
+            <div>
+              Detector {modelRuntime.detector.runtime} / {modelRuntime.detector.accelerator}
+            </div>
+          )}
+          {modelRuntime.gaze && (
+            <div>
+              Gaze {modelRuntime.gaze.runtime} / {modelRuntime.gaze.accelerator}
+            </div>
+          )}
+          {config && (
+            <div>
+              display {config.displayIndex + 1}/{config.displayCount}
+            </div>
+          )}
+        </section>
+      )}
     </main>
   );
 }

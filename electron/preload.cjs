@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("gazeBridge", {
   getConfig: () => ipcRenderer.invoke("get-config"),
+  readCalibration: (path) => ipcRenderer.invoke("read-calibration", path),
+  writeCalibration: (path, payload) => ipcRenderer.invoke("write-calibration", path, payload),
   ready: () => ipcRenderer.send("renderer-ready"),
   setOverlayRegions: (regions) => ipcRenderer.send("overlay-regions", regions),
   onBackendMessage: (callback) => {

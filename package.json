@@ -8,11 +8,14 @@
     "dev": "node scripts/dev.cjs",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "start": "node scripts/start.cjs"
   },
   "dependencies": {
+    "@litertjs/core": "2.5.2",
     "@vitejs/plugin-react": "6.0.2",
     "electron": "42.4.1",
+    "onnxruntime-web": "1.26.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "vite": "8.0.16"
@@ -21,6 +24,7 @@
     "@types/node": "25.9.3",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
   }
 }
