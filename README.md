@@ -6,6 +6,8 @@ The application is built as an Electron + React transparent overlay with a Pytho
 
 https://github.com/user-attachments/assets/7eff8143-2417-4459-8e63-de97868e3ff0
 
+<img width="843" height="458" alt="image" src="https://github.com/user-attachments/assets/c3e192f0-9cb2-4ab8-ae31-9c93ce0647eb" />
+
 ## Setup
 
 Python is pinned to the 3.10.x series. This repository uses `.python-version` set to `3.10.12`.
