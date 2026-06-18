@@ -1,0 +1,249 @@
+:root {
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  color: #f8fafc;
+  background: transparent;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+  user-select: none;
+}
+
+.gaze-dot {
+  position: absolute;
+  left: -13px;
+  top: -13px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #ef233c;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.92),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 90ms linear,
+    opacity 160ms ease;
+  will-change: transform, opacity;
+}
+
+.camera-marker {
+  position: fixed;
+  left: -40px;
+  top: 0;
+  width: 80px;
+  height: 74px;
+  pointer-events: none;
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.55));
+}
+
+.camera-triangle {
+  position: absolute;
+  left: 18px;
+  top: 6px;
+  width: 0;
+  height: 0;
+  border-left: 22px solid transparent;
+  border-right: 22px solid transparent;
+  border-bottom: 38px solid #ffd60a;
+}
+
+.camera-triangle::after {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 7px;
+  width: 0;
+  height: 0;
+  border-left: 16px solid transparent;
+  border-right: 16px solid transparent;
+  border-bottom: 27px solid #111827;
+}
+
+.camera-stem {
+  position: absolute;
+  left: 36px;
+  top: 42px;
+  width: 8px;
+  height: 28px;
+  border-radius: 999px;
+  background: #ffd60a;
+  box-shadow: 0 0 0 2px #111827;
+}
+
+.calibration-target {
+  position: absolute;
+  left: -30px;
+  top: -30px;
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.calibration-target > div {
+  position: absolute;
+  left: 25px;
+  top: 25px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #00d084;
+}
+
+.calibration-countdown {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 160px;
+  height: 160px;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #ffffff;
+  font-size: 92px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.9),
+    0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.calibration-arrow {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 176px;
+  height: 72px;
+  transform-origin: 0 50%;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.5));
+}
+
+.calibration-arrow-shape {
+  position: absolute;
+  inset: 2px;
+  background: #ffffff;
+  clip-path: polygon(0 31%, 64% 31%, 64% 8%, 100% 50%, 64% 92%, 64% 69%, 0 69%);
+}
+
+.calibration-arrow-shape::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  background: #ef233c;
+  clip-path: inherit;
+}
+
+.calibration-arrow-shape::after {
+  content: "";
+  position: absolute;
+  inset: 13px 22px 31px 22px;
+  background: rgba(255, 255, 255, 0.2);
+  clip-path: polygon(0 31%, 61% 31%, 61% 11%, 100% 50%, 61% 89%, 61% 69%, 0 69%);
+}
+
+.calibration-center-arrows {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 520px;
+  height: 82px;
+  transform: translate(-50%, -50%);
+}
+
+.calibration-center-arrows .calibration-arrow {
+  position: absolute;
+  top: 50%;
+  transform-origin: 50% 50%;
+}
+
+.calibration-center-arrow-left {
+  left: calc(50% - 224px);
+  transform: translate(0, -50%);
+}
+
+.calibration-center-arrow-right {
+  left: calc(50% + 48px);
+  transform: translate(0, -50%);
+}
+
+.calibration-center-arrow-right .calibration-arrow-shape {
+  transform: scaleX(-1);
+}
+
+.preview {
+  position: fixed;
+  right: 16px;
+  top: 16px;
+  width: min(320px, calc(100vw - 32px));
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.86);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+}
+
+.preview img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.preview div {
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #f8fafc;
+}
+
+.preview .ok {
+  border-left: 4px solid #14b8a6;
+}
+
+.preview .warn {
+  border-left: 4px solid #f59e0b;
+}
+
+.status {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  min-width: 260px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.status.warning {
+  border-left: 4px solid #f59e0b;
+}
+
+.status.error {
+  border-left: 4px solid #ef4444;
+}
+
+.status.info {
+  border-left: 4px solid #14b8a6;
+}

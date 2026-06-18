@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "screen-eye-tracking"
+version = "0.1.0"
+description = "Screen gaze hit-point estimator using DEIMv2 eye detection and ONNX gaze estimation."
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "numpy==2.2.6",
+  "onnxruntime-gpu==1.23.2",
+  "opencv-python==4.13.0.92",
+]
+
+[project.scripts]
+gaze-backend = "screen_eye_tracking.backend:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/screen_eye_tracking"]

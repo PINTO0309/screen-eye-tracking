@@ -1,0 +1,26 @@
+{
+  "name": "screen-eye-tracking",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.cjs",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "start": "node scripts/start.cjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.0.2",
+    "electron": "42.4.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "vite": "8.0.16"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3"
+  }
+}
