@@ -45,6 +45,7 @@ function backendArgs(args, displayBounds) {
     "--deim-model",
     "--gaze-model",
     "--smoothing-alpha",
+    "--smoothing-alpha-y",
     "--preview-fps",
     "--camera-screen-x",
     "--camera-screen-y",

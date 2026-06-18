@@ -153,7 +153,7 @@ function App() {
         });
       };
       addElement(cameraMarkerRef.current, 18);
-      if (gaze && Date.now() - gaze.receivedAt <= 1500) {
+      if (!calibrationActive && gaze && Date.now() - gaze.receivedAt <= 1500) {
         addElement(gazeDotRef.current, 24);
       }
       addElement(calibrationCountdownRef.current, 32);
@@ -172,7 +172,7 @@ function App() {
       window.clearInterval(intervalId);
       window.removeEventListener("resize", collectRegions);
     };
-  }, [config, gaze, preview, status, statusLevel, calibrationCountdown, calibrationIndex, target]);
+  }, [config, gaze, preview, status, statusLevel, calibrationActive, calibrationCountdown, calibrationIndex, target]);
 
   return (
     <main className="overlay">
@@ -187,7 +187,7 @@ function App() {
         <div className="camera-arrow-shape" />
         <div className="camera-label">Camera position</div>
       </div>
-      <div ref={gazeDotRef} className="gaze-dot" style={dotStyle} />
+      {!calibrationActive && <div ref={gazeDotRef} className="gaze-dot" style={dotStyle} />}
       {calibrationCountdown !== null && (
         <div ref={calibrationCountdownRef} className="calibration-countdown">
           {calibrationCountdown}

@@ -75,6 +75,8 @@ pnpm dev -- \
 - `--score-threshold`: Head/Eye detection score threshold.
 - `--calibration-file`: Path for the 5-point calibration result. Default: `.gaze_calibration.json`.
 - `--calibrate`: Runs 5-point calibration.
+- `--smoothing-alpha`: Horizontal gaze marker smoothing. Larger values are steadier but slower. Default: `0.65`.
+- `--smoothing-alpha-y`: Vertical gaze marker smoothing. Larger values are steadier but slower. Default: `0.45`.
 - `--preview-fps`: PiP camera preview update FPS. Default: `8`.
 - `--hide-preview`: Hides the PiP camera preview.
 - `--no-flip-x`: Disables horizontal gaze point flip correction. By default the screen x coordinate is flipped.
@@ -85,7 +87,9 @@ pnpm dev -- \
 - `--eye-position-weight-y`: Weight for the parallel translation correction from the face/eye bbox Y position. Default: `0.25`. Lower this if posture changes make the marker stick to the top or bottom edge.
 - `--retinaface-head-face-ratio`: Static ratio used with RetinaFace to convert Face width to Head-equivalent width. Default: `1.545`.
 
-The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green and Eye detections are drawn in yellow. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
+If vertical tracking feels too slow while horizontal tracking is acceptable, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`.
+
+The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green and Eye detections are drawn in yellow. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
 
 When RetinaFace is used, distance estimation still needs the `16cm` Head-width assumption used by DEIMv2 Head detection. RetinaFace Face width is narrower than Head width, so the static source constant `RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545` converts Face width to Head-equivalent width before distance estimation. The current ratio is shown in the lower-right status area and the PiP preview.
 
@@ -119,7 +123,7 @@ pnpm dev -- --backend cuda --calibrate
 
 After a centered `3`, `2`, `1` countdown, calibration targets appear in sequence. For the center target, two red arrows bracket the target as `-> O <-`. For outer targets, a red arrow at the screen center points toward the target direction. The inner circle expands from a small red circle to yellow and then green, fitting the outer circle when the point display completes. Look at the displayed target. The app samples each point automatically, computes a 2D affine correction from the 5 raw estimates and target points, and saves it to `.gaze_calibration.json`. The same file is loaded automatically on later runs.
 
-When `--calibrate` is used, the PiP camera preview is hidden only during the 5-point calibration targets so the targets are easier to see. The PiP preview returns after calibration completes.
+When `--calibrate` is used, the PiP camera preview and normal red gaze marker are hidden during the 5-point calibration targets so the targets are easier to see. The PiP preview and gaze marker return after calibration completes.
 
 If the marker sticks to a screen edge after calibration when your face moves up or down, delete the old `.gaze_calibration.json` and recalibrate. New calibration files store raw input bounds and suppress strong extrapolation outside the calibrated range.
 

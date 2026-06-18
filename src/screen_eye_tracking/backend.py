@@ -133,12 +133,27 @@ def draw_box(image: np.ndarray, detection: Detection, color: tuple[int, int, int
     cv2.putText(image, text, (x1, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
 
 
+def draw_gaze_lines(image: np.ndarray, eyes: list[Detection], yaw_deg: float, pitch_deg: float) -> None:
+    diag = math.sqrt(float(image.shape[0] * image.shape[1]))
+    length = 0.4 * diag
+    dx = length * math.sin(math.radians(yaw_deg))
+    dy = length * math.sin(math.radians(-pitch_deg))
+    for eye in eyes[:2]:
+        start = (int(round(eye.center[0])), int(round(eye.center[1])))
+        end = (int(round(eye.center[0] + dx)), int(round(eye.center[1] + dy)))
+        cv2.line(image, start, end, (0, 0, 0), 7, cv2.LINE_AA)
+        cv2.line(image, start, end, (0, 255, 0), 4, cv2.LINE_AA)
+        cv2.circle(image, start, 5, (0, 0, 0), -1, cv2.LINE_AA)
+        cv2.circle(image, start, 3, (0, 255, 0), -1, cv2.LINE_AA)
+
+
 def emit_preview(
     frame: np.ndarray,
     head: Detection | None,
     eyes: list[Detection],
     message: str | None = None,
     width_ratio: float | None = None,
+    gaze_angles: tuple[float, float] | None = None,
 ) -> None:
     preview = frame.copy()
     if head is not None:
@@ -147,6 +162,8 @@ def emit_preview(
         draw_box(preview, eye, (0, 210, 255), "Eye")
         cx, cy = [int(round(v)) for v in eye.center]
         cv2.circle(preview, (cx, cy), 4, (0, 210, 255), -1)
+    if gaze_angles is not None and len(eyes) >= 2:
+        draw_gaze_lines(preview, eyes, gaze_angles[0], gaze_angles[1])
     if message:
         cv2.putText(preview, message, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 0, 0), 4, cv2.LINE_AA)
         cv2.putText(preview, message, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (255, 255, 255), 2, cv2.LINE_AA)
@@ -544,6 +561,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deim-model", type=Path, default=DEFAULT_DEIM_MODEL)
     parser.add_argument("--gaze-model", type=Path, default=DEFAULT_GAZE_MODEL)
     parser.add_argument("--smoothing-alpha", type=float, default=0.65)
+    parser.add_argument("--smoothing-alpha-y", type=float, default=0.45)
     parser.add_argument("--preview-fps", type=float, default=8.0)
     parser.add_argument("--hide-preview", action="store_true")
     parser.add_argument("--no-flip-x", action="store_true")
@@ -653,11 +671,12 @@ def main() -> None:
             try:
                 head, eyes = detector.detect(frame)
                 now = time.monotonic()
-                if not args.hide_preview and now - last_preview >= preview_interval:
+                should_emit_preview = not args.hide_preview and now - last_preview >= preview_interval
+                if should_emit_preview and (head is None or len(eyes) < 2):
                     preview_message = None
                     if head is None:
                         preview_message = "Head not detected"
-                    elif len(eyes) < 2:
+                    else:
                         preview_message = f"Eyes detected: {len(eyes)}"
                     emit_preview(
                         frame,
@@ -672,6 +691,16 @@ def main() -> None:
                 if len(eyes) < 2:
                     raise ValueError("Two eyes were not detected")
                 yaw_deg, pitch_deg = gaze.estimate(frame, head, eyes)
+                if should_emit_preview:
+                    emit_preview(
+                        frame,
+                        head,
+                        eyes,
+                        None,
+                        head_face_width_ratio if args.detector == "retinaface" else None,
+                        (yaw_deg, pitch_deg),
+                    )
+                    last_preview = now
                 eye_center = (
                     (eyes[0].center[0] + eyes[1].center[0]) * 0.5,
                     (eyes[0].center[1] + eyes[1].center[1]) * 0.5,
@@ -683,10 +712,11 @@ def main() -> None:
                 if smoothed is None:
                     smoothed = corrected
                 else:
-                    alpha = max(0.0, min(0.95, args.smoothing_alpha))
+                    alpha_x = max(0.0, min(0.95, args.smoothing_alpha))
+                    alpha_y = max(0.0, min(0.95, args.smoothing_alpha_y))
                     smoothed = (
-                        alpha * smoothed[0] + (1.0 - alpha) * corrected[0],
-                        alpha * smoothed[1] + (1.0 - alpha) * corrected[1],
+                        alpha_x * smoothed[0] + (1.0 - alpha_x) * corrected[0],
+                        alpha_y * smoothed[1] + (1.0 - alpha_y) * corrected[1],
                     )
                 confidence = min(head.score, (eyes[0].score + eyes[1].score) * 0.5)
                 emit(
