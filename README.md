@@ -22,7 +22,7 @@ source .venv/bin/activate
 pnpm install
 ```
 
-Place the required models under `public/models/`.
+Download the model files from the [`onnx` release](https://github.com/PINTO0309/screen-eye-tracking/releases/tag/onnx), then place the required models under `public/models/`.
 
 ```text
 public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
