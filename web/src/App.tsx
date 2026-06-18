@@ -18,6 +18,8 @@ const calibrationPoints: [number, number][] = [
   [0.88, 0.88],
   [0.12, 0.88]
 ];
+const calibrationTargetDurationMs = 1900;
+const calibrationCaptureDelayMs = 1800;
 
 function App() {
   const [config, setConfig] = useState<RendererConfig | null>(null);
@@ -92,12 +94,12 @@ function App() {
     }
     const captureTimer = window.setTimeout(() => {
       window.gazeBridge.sendCalibrationCapture(calibrationPoints[calibrationIndex]);
-    }, 1400);
+    }, calibrationCaptureDelayMs);
     const nextTimer = window.setTimeout(() => {
       if (calibrationIndex + 1 < calibrationPoints.length) {
         setCalibrationIndex(calibrationIndex + 1);
       }
-    }, 1900);
+    }, calibrationTargetDurationMs);
     return () => {
       window.clearTimeout(captureTimer);
       window.clearTimeout(nextTimer);
@@ -182,8 +184,8 @@ function App() {
           transform: `translate(${(config?.cameraScreenX ?? 0.5) * window.innerWidth}px, ${(config?.cameraScreenY ?? 0) * window.innerHeight}px)`
         }}
       >
-        <div className="camera-triangle" />
-        <div className="camera-stem" />
+        <div className="camera-arrow-shape" />
+        <div className="camera-label">Camera position</div>
       </div>
       <div ref={gazeDotRef} className="gaze-dot" style={dotStyle} />
       {calibrationCountdown !== null && (
@@ -208,6 +210,7 @@ function App() {
       )}
       {target && (
         <div
+          key={calibrationIndex}
           ref={calibrationTargetRef}
           className="calibration-target"
           style={{

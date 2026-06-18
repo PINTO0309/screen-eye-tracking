@@ -1,12 +1,12 @@
 # Screen Eye Tracking
 
-RetinaFaceまたはDEIMv2 Wholebody49の目位置検出と gaze ONNX モデルを使い、ディスプレイ上の視線ヒット位置に赤い点を表示するデスクトップアプリケーションです。
+A desktop application that estimates where the user is looking on the selected display and renders a red gaze marker at the estimated hit position. It uses RetinaFace or DEIMv2 Wholebody49 for eye position detection and an ONNX gaze model for gaze estimation.
 
-構成は Electron + React の透明オーバーレイと、Python/ONNX Runtime GPU の推論バックエンドです。
+The application is built as an Electron + React transparent overlay with a Python / ONNX Runtime GPU inference backend.
 
-## セットアップ
+## Setup
 
-Python は 3.10.x 固定です。このリポジトリでは `.python-version` を `3.10.12` にしています。
+Python is pinned to the 3.10.x series. This repository uses `.python-version` set to `3.10.12`.
 
 ```bash
 uv sync
@@ -14,42 +14,42 @@ source .venv/bin/activate
 pnpm install
 ```
 
-必要なモデルは `models/` に配置します。
+Place the required models under `models/`.
 
 ```text
 models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
 models/generalizing_gaze_estimation_with_weak_supervision_from_synthetic_views_Nx3x160x160.onnx
 ```
 
-DEIMv2を検出器として使う場合は次のモデルも配置します。
+If you use DEIMv2 as the detector, also place this model under `models/`.
 
 ```text
 models/deimv2_dinov3_s_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.onnx
 ```
 
-## 起動
+## Run
 
-デフォルトは TensorRT です。TensorRT が使えない場合は警告を表示して CUDA、CPU の順にfallbackします。
-
-```bash
-pnpm dev -- --backend tensorrt
-```
-
-CUDA/CPU を明示する場合:
+The default ONNX Runtime backend is TensorRT. If TensorRT is unavailable, the backend emits a warning and falls back to CUDA, then CPU.
 
 ```bash
-pnpm dev -- --backend cuda
-pnpm dev -- --backend cpu
+pnpm dev -- --backend tensorrt --calibrate
 ```
 
-ビルドして起動する場合:
+To explicitly use CUDA or CPU:
+
+```bash
+pnpm dev -- --backend cuda --calibrate
+pnpm dev -- --backend cpu --calibrate
+```
+
+To build and run:
 
 ```bash
 pnpm build
-pnpm start -- --backend tensorrt
+pnpm start -- --backend tensorrt --calibrate
 ```
 
-## 主なオプション
+## Main Options
 
 ```bash
 pnpm dev -- \
@@ -62,85 +62,85 @@ pnpm dev -- \
 --preview-fps 8
 ```
 
-- `--backend tensorrt|cuda|cpu`: ONNX Runtime の実行バックエンド。デフォルトは `tensorrt`。
-- `--detector retinaface|deim`: 目位置の検出器。デフォルトは `retinaface`。
-- `--retinaface-model`: RetinaFaceモデルパス。デフォルトは `models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx`。
-- `--deim-model`: DEIMv2モデルパス。`--detector deim` のときに使います。
-- `--detector-model`: 選択中の検出器モデルパスを直接上書きします。
-- `--display-index`: 点を表示する対象モニタ番号。Electron が取得したモニタ一覧の並び順です。
-- `--debug-overlay`: 透明オーバーレイではなく通常の不透明ウィンドウで起動し、DevToolsも開きます。
-- `--shape-overlay`: Linux/Windowsで透明ウィンドウの形状を可視部品周辺だけに絞ります。通常のクリック透過が効かない環境向けのfallbackです。視線マーカーがちらつく場合は使わないでください。
-- `--display-size-inch`: 対象モニタの対角インチ。`18, 19, ..., 31, 31.5, 32` から選択します。デフォルトは `31.5`。
-- `--camera`: OpenCV のカメラ番号または動画パス。デフォルトは `0`。
-- `--score-threshold`: Head/Eye 検出のscore閾値。
-- `--calibration-file`: 5点補正結果の保存先。デフォルトは `.gaze_calibration.json`。
-- `--calibrate`: 5点簡易キャリブレーションを実行します。
-- `--preview-fps`: 右上のPiPカメラプレビュー更新FPS。デフォルトは `8`。
-- `--hide-preview`: PiPカメラプレビューを非表示にします。
-- `--no-flip-x`: 視線点の左右反転補正を無効化します。デフォルトでは画面x座標を反転補正します。
-- `--no-flip-y`: gazeモデルのpitch成分に対する上下反転補正を無効化します。顔/目のカメラ内Y位置による平行移動補正は反転しません。
-- `--camera-screen-x`: カメラ設置位置の画面内X座標。左端 `0.0`、中央 `0.5`、右端 `1.0`。デフォルトは `0.5`。
-- `--camera-screen-y`: カメラ設置位置の画面内Y座標。上端 `0.0`、中央 `0.5`、下端 `1.0`。デフォルトは `0.0`。
-- `--eye-position-weight-x`: 顔/目bboxのX位置による平行移動補正の重み。デフォルトは `1.0`。
-- `--eye-position-weight-y`: 顔/目bboxのY位置による平行移動補正の重み。デフォルトは `0.25`。姿勢変化で上下に張り付く場合は小さくします。
-- `--retinaface-head-face-ratio`: RetinaFace利用時にFace幅をHead幅相当に補正する静的比率。デフォルトは `1.545`。
+- `--backend tensorrt|cuda|cpu`: ONNX Runtime execution backend. Default: `tensorrt`.
+- `--detector retinaface|deim`: Eye position detector. Default: `retinaface`.
+- `--retinaface-model`: RetinaFace model path. Default: `models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx`.
+- `--deim-model`: DEIMv2 model path. Used when `--detector deim` is selected.
+- `--detector-model`: Directly overrides the selected detector model path.
+- `--display-index`: Target monitor index for the overlay marker. This uses the display order reported by Electron.
+- `--debug-overlay`: Starts as a normal opaque window instead of a transparent overlay and opens DevTools.
+- `--shape-overlay`: On Linux/Windows, restricts the transparent window shape to the visible overlay elements. This is a fallback for environments where normal click-through does not work. Do not use it if the gaze marker flickers.
+- `--display-size-inch`: Target monitor diagonal size. Choices are `18, 19, ..., 31, 31.5, 32`. Default: `31.5`.
+- `--camera`: OpenCV camera index or video path. Default: `0`.
+- `--score-threshold`: Head/Eye detection score threshold.
+- `--calibration-file`: Path for the 5-point calibration result. Default: `.gaze_calibration.json`.
+- `--calibrate`: Runs 5-point calibration.
+- `--preview-fps`: PiP camera preview update FPS. Default: `8`.
+- `--hide-preview`: Hides the PiP camera preview.
+- `--no-flip-x`: Disables horizontal gaze point flip correction. By default the screen x coordinate is flipped.
+- `--no-flip-y`: Disables vertical pitch flip correction for the gaze model output. The parallel translation correction from the face/eye camera-space Y position is not flipped.
+- `--camera-screen-x`: Camera position on the target screen, normalized horizontally. Left `0.0`, center `0.5`, right `1.0`. Default: `0.5`.
+- `--camera-screen-y`: Camera position on the target screen, normalized vertically. Top `0.0`, center `0.5`, bottom `1.0`. Default: `0.0`.
+- `--eye-position-weight-x`: Weight for the parallel translation correction from the face/eye bbox X position. Default: `1.0`.
+- `--eye-position-weight-y`: Weight for the parallel translation correction from the face/eye bbox Y position. Default: `0.25`. Lower this if posture changes make the marker stick to the top or bottom edge.
+- `--retinaface-head-face-ratio`: Static ratio used with RetinaFace to convert Face width to Head-equivalent width. Default: `1.545`.
 
-右上のPiPにはカメラ映像と検出結果を表示します。Head/Face相当のbboxは緑、Eyeは黄で描画され、`Head OK / Eyes 2` になっていれば検出と目の選択が視線推定に使える状態です。
+The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green and Eye detections are drawn in yellow. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
 
-RetinaFaceを使う場合、距離計算にはDEIMv2のHead幅を基準にした `16cm` 仮定が必要です。RetinaFaceのFace幅はHead幅より狭いため、ソースコード内の `RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545` を静的補正係数として使い、Face幅をHead幅相当に補正して距離計算に反映します。現在の比率は右下ステータスとPiP内に表示されます。
+When RetinaFace is used, distance estimation still needs the `16cm` Head-width assumption used by DEIMv2 Head detection. RetinaFace Face width is narrower than Head width, so the static source constant `RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545` converts Face width to Head-equivalent width before distance estimation. The current ratio is shown in the lower-right status area and the PiP preview.
 
-DEIMv2のEye検出を使う場合:
+To use DEIMv2 Eye detection:
 
 ```bash
 pnpm dev -- --backend cuda --detector deim
 ```
 
-## 画面に何も表示されない場合
+## If Nothing Appears
 
-`pnpm dev` は Vite の5173番ポートを使います。既存のdev serverが残っている場合は誤接続を避けるため起動を止めるので、先に古いプロセスを終了してください。
+`pnpm dev` uses Vite on port `5173`. If an old dev server is still running, startup is stopped to avoid connecting to the wrong renderer. Stop the old process first.
 
-透明ウィンドウのため、rendererのロード失敗や別モニタ表示が見えにくい場合があります。まず通常ウィンドウで確認してください。
+Because the default window is transparent, renderer load failures or display selection mistakes can be hard to see. First verify with a normal window:
 
 ```bash
 pnpm dev -- --backend tensorrt --debug-overlay
 ```
 
-通常の透明オーバーレイではマウスイベントを背面アプリへ透過します。●、PiP、ステータス表示、カメラ位置マーカーが見えていても、その領域をクリックした操作は背面アプリへ届きます。通常は視線マーカーのちらつきを避けるため、OSのウィンドウ形状は更新しません。クリック透過が効かない環境だけ `--shape-overlay` を試してください。`--debug-overlay` のときだけ通常ウィンドウとして操作を受け取ります。
+In the normal transparent overlay, mouse events pass through to the application behind it. Clicks pass through even when the red gaze marker, PiP, status panel, or camera position marker is visible. The camera position marker is shown as an upward arrow with the `Camera position` label. To avoid gaze-marker flicker, the OS window shape is not updated by default. Try `--shape-overlay` only in environments where normal click-through does not work. `--debug-overlay` is the only mode where the overlay receives normal window input.
 
-起動ログには `Display 0`, `Display 1` のようにモニタ一覧が出ます。表示先が違う場合は `--display-index` を指定します。`--display-index` を省略した場合はプライマリディスプレイを使います。
+Startup logs include display entries such as `Display 0` and `Display 1`. If the overlay appears on the wrong monitor, specify `--display-index`. When `--display-index` is omitted, the primary display is used.
 
-## 5点キャリブレーション
+## 5-Point Calibration
 
-キャリブレーションなしでも起動できます。補正したい場合は `--calibrate` を付けて起動します。
+The app can run without calibration. To calibrate, start it with `--calibrate`.
 
 ```bash
 pnpm dev -- --backend cuda --calibrate
 ```
 
-画面中央に `3`, `2`, `1` のカウントダウンが出た後、ターゲットが順番に表示されます。中央ターゲットでは左右2本の赤い矢印で `→ ○ ←` のように丸を挟み、外周ターゲットでは画面中央にターゲット方向を示す赤い矢印を表示します。表示されたターゲットを見てください。アプリが各点を自動でサンプリングし、5点分のraw推定値とターゲットから2D affine補正を計算して `.gaze_calibration.json` に保存します。次回以降は同じファイルが自動で読み込まれます。
+After a centered `3`, `2`, `1` countdown, calibration targets appear in sequence. For the center target, two red arrows bracket the target as `-> O <-`. For outer targets, a red arrow at the screen center points toward the target direction. The inner circle expands from a small red circle to yellow and then green, fitting the outer circle when the point display completes. Look at the displayed target. The app samples each point automatically, computes a 2D affine correction from the 5 raw estimates and target points, and saves it to `.gaze_calibration.json`. The same file is loaded automatically on later runs.
 
-`--calibrate` を付けた起動では、ターゲットを見やすくするため5点キャリブレーション中だけPiPカメラプレビューは非表示になります。キャリブレーション完了後は再び表示されます。
+When `--calibrate` is used, the PiP camera preview is hidden only during the 5-point calibration targets so the targets are easier to see. The PiP preview returns after calibration completes.
 
-キャリブレーション後に顔の上下位置を変えると●が画面端に張り付く場合、古い `.gaze_calibration.json` を削除して再キャリブレーションしてください。新しいキャリブレーションファイルにはraw入力範囲が保存され、範囲外への強い外挿を抑制します。
+If the marker sticks to a screen edge after calibration when your face moves up or down, delete the old `.gaze_calibration.json` and recalibrate. New calibration files store raw input bounds and suppress strong extrapolation outside the calibrated range.
 
-## 推定の前提
+## Estimation Assumptions
 
-- カメラ入力は `640x480`、水平FOVは `90°` として扱います。
-- カメラは対象ディスプレイの上中央にある前提です。
-- 上下方向は顔/目bboxのY座標からカメラ中心に対する目の高さを推定し、カメラが画面上端中央にあるものとして画面座標へ投影します。顔が画角上へ移動した場合は点も上へ、下へ移動した場合は点も下へ動く向きです。
-- 成人の平均的な頭部横幅を `16cm` と仮定し、検出器の顔/頭部bbox横幅から目とディスプレイの距離を推定します。
-- RetinaFace利用時は、静的なHead/Face幅比率 `1.545` でFace幅をHead幅相当に補正します。
-- デフォルトでは RetinaFace の左右目ランドマークを視線モデル用cropの中心計算に使います。
-- `--detector deim` の場合は DEIMv2 の classid `17` Eye の上位2件を使います。
+- Camera input is treated as `640x480` with a horizontal FOV of `90°`.
+- The camera is assumed to be mounted at the top center of the target display.
+- For the vertical direction, the app estimates eye height relative to the camera center from the face/eye bbox Y position and projects it to screen coordinates assuming the camera is at the top center of the display. If the face moves upward in the camera frame, the marker moves upward; if the face moves downward, the marker moves downward.
+- Adult average Head width is assumed to be `16cm`. The eye-to-display distance is estimated from the detected face/head bbox width.
+- With RetinaFace, Face width is converted to Head-equivalent width using the static Head/Face ratio `1.545`.
+- By default, RetinaFace left/right eye landmarks are used to compute the gaze-model crop center.
+- With `--detector deim`, the top two DEIMv2 class id `17` Eye detections are used.
 
-## 既知の制約
+## Known Limitations
 
-- カメラが画面上中央から大きくずれる場合、キャリブレーションなしの絶対位置精度は落ちます。
-- 頭部横幅16cmの仮定から外れるほど距離推定がずれます。
-- 眼鏡、強い逆光、暗い環境、顔の大きな回転では Eye/Head 検出またはgaze推定が不安定になります。
-- 複数人が映る場合は、scoreが最も高いHeadを対象にします。
+- Absolute position accuracy degrades without calibration if the camera is far from the top center of the display.
+- Distance estimation drifts when the user's actual Head width differs from the `16cm` assumption.
+- Glasses, strong backlight, dark scenes, or large face rotation can destabilize Eye/Head detection or gaze estimation.
+- When multiple people are visible, the highest-score Head is selected.
 
-## 検証
+## Verification
 
 ```bash
 uv run python -m compileall src
