@@ -76,6 +76,7 @@ To run inference fully in Electron without starting Python:
 pnpm dev -- --runtime onnxweb --calibrate --gaze-projection-mode binocular-screen
 # Not recommended: LiteRT.js
 # WebGPU isn't working properly, so it falls back to WASM, which makes it very slow.
+# Removing NMS from the model will probably make it work with WebGPU.
 pnpm dev -- --runtime litert --calibrate --gaze-projection-mode binocular-screen
 ```
 
