@@ -18,8 +18,9 @@ Python is pinned to the 3.10.x series. This repository uses `.python-version` se
 
 ```bash
 # Installing uv
+## Linux / Mac
 curl -LsSf https://astral.sh/uv/install.sh | sh
-# Windows
+## Windows
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 uv sync
