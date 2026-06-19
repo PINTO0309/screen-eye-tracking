@@ -17,6 +17,9 @@ The application is built as an Electron + React transparent overlay. It can run 
 Python is pinned to the 3.10.x series. This repository uses `.python-version` set to `3.10.12`.
 
 ```bash
+# Installing uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 uv sync
 source .venv/bin/activate
 pnpm install
