@@ -52,6 +52,7 @@ export interface WebInferenceConfig {
   detector: "retinaface" | "deim";
   backend: string;
   camera: string;
+  cameraFov: number;
   scoreThreshold: number;
   displaySizeInch: number;
   displayWidth: number;
@@ -104,6 +105,7 @@ export type BackendMessage =
       detector_model?: string;
       detector_providers?: string[];
       head_face_width_ratio?: number;
+      camera_fov_deg?: number;
       camera_screen_x?: number;
       camera_screen_y?: number;
       eye_position_weight_x?: number;

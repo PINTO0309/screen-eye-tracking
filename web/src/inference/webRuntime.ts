@@ -75,6 +75,7 @@ export async function startWebRuntime(
       detector_model: config.retinafaceModel,
       detector_providers: models.detectorProviders,
       head_face_width_ratio: config.retinafaceHeadFaceRatio,
+      camera_fov_deg: config.cameraFov,
       camera_screen_x: config.cameraScreenX,
       camera_screen_y: config.cameraScreenY,
       eye_position_weight_x: config.eyePositionWeightX,
@@ -101,7 +102,8 @@ export async function startWebRuntime(
       config.cameraScreenX,
       config.cameraScreenY,
       config.eyePositionWeightX,
-      config.eyePositionWeightY
+      config.eyePositionWeightY,
+      config.cameraFov
     );
     const previewInterval = 1000 / Math.max(0.5, config.previewFps);
 
@@ -200,6 +202,7 @@ export async function startWebRuntime(
               detector_model: config.retinafaceModel,
               detector_providers: models.detectorProviders,
               head_face_width_ratio: config.retinafaceHeadFaceRatio,
+              camera_fov_deg: config.cameraFov,
               camera_screen_x: config.cameraScreenX,
               camera_screen_y: config.cameraScreenY,
               eye_position_weight_x: config.eyePositionWeightX,

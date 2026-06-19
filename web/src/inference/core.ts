@@ -46,6 +46,10 @@ export function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+export function validCameraFovDeg(value: number, fallback = CAMERA_HORIZONTAL_FOV_DEG): number {
+  return Number.isFinite(value) && value > 0 && value < 180 ? value : fallback;
+}
+
 export function center(det: Detection): [number, number] {
   return [(det.x1 + det.x2) * 0.5, (det.y1 + det.y2) * 0.5];
 }
@@ -320,7 +324,8 @@ export class ScreenProjector {
   readonly cameraScreenY: number;
   readonly eyePositionWeightX: number;
   readonly eyePositionWeightY: number;
-  readonly focalPx = CAMERA_WIDTH / (2 * Math.tan((CAMERA_HORIZONTAL_FOV_DEG * Math.PI) / 180 * 0.5));
+  readonly cameraFovDeg: number;
+  readonly focalPx: number;
 
   constructor(
     readonly display: DisplayGeometry,
@@ -329,12 +334,15 @@ export class ScreenProjector {
     cameraScreenX = 0.5,
     cameraScreenY = 0,
     eyePositionWeightX = 1,
-    eyePositionWeightY = 0.25
+    eyePositionWeightY = 0.25,
+    cameraFovDeg = CAMERA_HORIZONTAL_FOV_DEG
   ) {
     this.cameraScreenX = clamp01(cameraScreenX);
     this.cameraScreenY = clamp01(cameraScreenY);
     this.eyePositionWeightX = clamp(eyePositionWeightX, 0, 1);
     this.eyePositionWeightY = clamp(eyePositionWeightY, 0, 1);
+    this.cameraFovDeg = validCameraFovDeg(cameraFovDeg);
+    this.focalPx = CAMERA_WIDTH / (2 * Math.tan((this.cameraFovDeg * Math.PI) / 180 * 0.5));
   }
 
   distanceFromHead(head: Detection, widthRatio = 1): number {

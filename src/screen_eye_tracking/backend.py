@@ -140,6 +140,10 @@ def clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def valid_camera_fov_deg(value: float, fallback: float = CAMERA_HORIZONTAL_FOV_DEG) -> float:
+    return value if math.isfinite(value) and 0.0 < value < 180.0 else fallback
+
+
 def draw_box(image: np.ndarray, detection: Detection, color: tuple[int, int, int], label: str) -> None:
     x1, y1, x2, y2 = [int(round(v)) for v in (detection.x1, detection.y1, detection.x2, detection.y2)]
     cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
@@ -530,6 +534,7 @@ class ScreenProjector:
         camera_screen_y: float = 0.0,
         eye_position_weight_x: float = 1.0,
         eye_position_weight_y: float = 0.25,
+        camera_fov_deg: float = CAMERA_HORIZONTAL_FOV_DEG,
     ) -> None:
         self.display = display
         self.flip_x = flip_x
@@ -538,7 +543,8 @@ class ScreenProjector:
         self.camera_screen_y = clamp01(camera_screen_y)
         self.eye_position_weight_x = max(0.0, min(1.0, eye_position_weight_x))
         self.eye_position_weight_y = max(0.0, min(1.0, eye_position_weight_y))
-        self.focal_px = CAMERA_WIDTH / (2.0 * math.tan(math.radians(CAMERA_HORIZONTAL_FOV_DEG) * 0.5))
+        self.camera_fov_deg = valid_camera_fov_deg(camera_fov_deg)
+        self.focal_px = CAMERA_WIDTH / (2.0 * math.tan(math.radians(self.camera_fov_deg) * 0.5))
 
     def distance_from_head(self, head: Detection, width_ratio: float = 1.0) -> float:
         corrected_width_px = max(1.0, head.width * width_ratio)
@@ -684,11 +690,19 @@ def display_size_arg(value: str) -> float:
     return parsed
 
 
+def camera_fov_arg(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0.0 or parsed >= 180.0:
+        raise argparse.ArgumentTypeError("camera FOV must be greater than 0 and less than 180 degrees")
+    return parsed
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--detector", choices=["retinaface", "deim"], default="retinaface")
     parser.add_argument("--backend", choices=["tensorrt", "cuda", "cpu"], default="tensorrt")
     parser.add_argument("--camera", default="0")
+    parser.add_argument("--camera-fov", type=camera_fov_arg, default=CAMERA_HORIZONTAL_FOV_DEG)
     parser.add_argument("--score-threshold", type=float, default=0.50)
     parser.add_argument("--display-size-inch", type=display_size_arg, default=31.5)
     parser.add_argument("--display-width", type=int, default=1920)
@@ -766,6 +780,7 @@ def main() -> None:
         camera_screen_y=args.camera_screen_y,
         eye_position_weight_x=args.eye_position_weight_x,
         eye_position_weight_y=args.eye_position_weight_y,
+        camera_fov_deg=args.camera_fov,
     )
     emit(
         {
@@ -776,6 +791,7 @@ def main() -> None:
             "detector_model": str(detector_model),
             "detector_providers": detector.providers,
             "head_face_width_ratio": head_face_width_ratio,
+            "camera_fov_deg": projector.camera_fov_deg,
             "camera_screen_x": projector.camera_screen_x,
             "camera_screen_y": projector.camera_screen_y,
             "eye_position_weight_x": projector.eye_position_weight_x,

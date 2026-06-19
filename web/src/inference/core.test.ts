@@ -14,6 +14,12 @@ describe("ScreenProjector", () => {
     expect(projector.project([320, 240], 0, 0, distanceM)).toEqual([0.5, 0.5]);
   });
 
+  it("uses camera FOV when computing focal length", () => {
+    const narrowFovProjector = new ScreenProjector(display, true, true, 0.5, 0, 1, 0.25, 60);
+    expect(narrowFovProjector.cameraFovDeg).toBe(60);
+    expect(narrowFovProjector.focalPx).toBeGreaterThan(projector.focalPx);
+  });
+
   it("matches legacy when binocular-screen eye angles match", () => {
     const estimate: GazeEstimate = {
       yawDeg: 5,

@@ -59,6 +59,11 @@ function readNumberOption(args, name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function readCameraFovOption(args) {
+  const value = readNumberOption(args, "--camera-fov", 90);
+  return value > 0 && value < 180 ? value : 90;
+}
+
 function resolveRuntime(args) {
   const runtime = readOption(args, "--runtime", "python");
   return ["python", "onnxweb", "litert"].includes(runtime) ? runtime : "python";
@@ -131,6 +136,7 @@ function backendArgs(args, displayBounds) {
     "--detector",
     "--backend",
     "--camera",
+    "--camera-fov",
     "--score-threshold",
     "--display-size-inch",
     "--calibration-file",
@@ -196,6 +202,7 @@ function webInferenceConfig(args, displayBounds, runtime) {
     detector,
     backend: readOption(args, "--backend", "tensorrt"),
     camera: readOption(args, "--camera", "0"),
+    cameraFov: readCameraFovOption(args),
     scoreThreshold: readNumberOption(args, "--score-threshold", 0.5),
     displaySizeInch: readNumberOption(args, "--display-size-inch", 31.5),
     displayWidth: displayBounds.width,

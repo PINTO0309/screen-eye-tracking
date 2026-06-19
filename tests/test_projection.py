@@ -24,6 +24,12 @@ class ScreenProjectorTest(unittest.TestCase):
 
         self.assertEqual(point, (0.5, 0.5))
 
+    def test_camera_fov_controls_focal_length(self) -> None:
+        narrow_fov_projector = ScreenProjector(self.display, camera_fov_deg=60.0)
+
+        self.assertEqual(narrow_fov_projector.camera_fov_deg, 60.0)
+        self.assertGreater(narrow_fov_projector.focal_px, self.projector.focal_px)
+
     def test_binocular_screen_matches_legacy_when_eye_angles_match(self) -> None:
         estimate = GazeEstimate(
             yaw_deg=5.0,
