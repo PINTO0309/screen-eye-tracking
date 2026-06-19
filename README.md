@@ -23,8 +23,17 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## Windows
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
+# Starting a virtual environment
 uv sync
 source .venv/bin/activate
+
+# Installing pnpm
+## Linux / Mac
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+## Windows
+Invoke-WebRequest https://get.pnpm.io/install.ps1 -UseBasicParsing | Invoke-Expression
+
+# Installing npm packages
 pnpm install
 ```
 
