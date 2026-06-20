@@ -221,6 +221,7 @@ __marimo__/
 *.profile
 *.onnx
 *.tflite
+*.tar.gz
 demo_deimv2_torch_wholebody49_ins.py
 demo_gaze_estimation.py
 
