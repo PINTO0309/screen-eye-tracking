@@ -91,7 +91,7 @@ pnpm dev -- --backend cpu --calibrate
 To run inference fully in Electron without starting Python:
 
 ```bash
-# Recommended: onnxruntime-web
+# onnxruntime-web
 pnpm dev -- --runtime onnxweb --calibrate --gaze-projection-mode binocular-screen
 # LiteRT.js
 pnpm dev -- --runtime litert --calibrate --gaze-projection-mode binocular-screen
