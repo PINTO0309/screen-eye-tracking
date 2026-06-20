@@ -232,3 +232,21 @@ uv run python -m compileall src
 pnpm build
 uv run python -m screen_eye_tracking.backend --help
 ```
+
+## Citation
+
+If you find this project useful, please consider citing:
+
+```bibtex
+@software{katsuya_hyodo_2026_20771714,
+  author    = {Katsuya Hyodo},
+  title     = {screen-eye-tracking},
+  year      = {2026},
+  month     = {jun},
+  publisher = {Zenodo},
+  version   = {1.0.0},
+  doi       = {10.5281/zenodo.20771714},
+  url       = {https://github.com/PINTO0309/screen-eye-tracking},
+  abstract  = {A desktop application that estimates where the user is looking on the selected display and renders a red gaze marker at the estimated hit position.},
+}
+```
