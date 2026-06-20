@@ -684,9 +684,8 @@ class ScreenProjector:
 
 def display_size_arg(value: str) -> float:
     parsed = float(value)
-    allowed = {float(v) for v in range(18, 32)} | {31.5, 32.0}
-    if parsed not in allowed:
-        raise argparse.ArgumentTypeError("display size must be one of 18, 19, ..., 31, 31.5, 32")
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError("display size must be a positive finite inch value")
     return parsed
 
 

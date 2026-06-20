@@ -130,7 +130,7 @@ pnpm dev -- \
 - `--display-index`: Target monitor index for the overlay marker. This uses the display order reported by Electron.
 - `--debug-overlay`: Starts as a normal opaque window instead of a transparent overlay and opens DevTools.
 - `--shape-overlay`: On Linux/Windows, restricts the transparent window shape to the visible overlay elements. This is a fallback for environments where normal click-through does not work. Do not use it if the gaze marker flickers.
-- `--display-size-inch`: Target monitor diagonal size. Choices are `18, 19, ..., 31, 31.5, 32`. Default: `31.5`.
+- `--display-size-inch`: Target monitor diagonal size in inches. Any positive finite value is accepted. Default: `31.5`.
 - `--camera`: Python runtime uses an OpenCV camera index or video path. Web runtimes use a browser video input index or `deviceId`. Default: `0`.
 - `--camera-fov`: Horizontal camera FOV in degrees. Must be greater than `0` and less than `180`. Default: `90`.
 - `--score-threshold`: Head/Eye detection score threshold.

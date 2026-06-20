@@ -59,6 +59,11 @@ function readNumberOption(args, name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function readPositiveNumberOption(args, name, fallback) {
+  const value = readNumberOption(args, name, fallback);
+  return value > 0 ? value : fallback;
+}
+
 function readCameraFovOption(args) {
   const value = readNumberOption(args, "--camera-fov", 90);
   return value > 0 && value < 180 ? value : 90;
@@ -204,7 +209,7 @@ function webInferenceConfig(args, displayBounds, runtime) {
     camera: readOption(args, "--camera", "0"),
     cameraFov: readCameraFovOption(args),
     scoreThreshold: readNumberOption(args, "--score-threshold", 0.5),
-    displaySizeInch: readNumberOption(args, "--display-size-inch", 31.5),
+    displaySizeInch: readPositiveNumberOption(args, "--display-size-inch", 31.5),
     displayWidth: displayBounds.width,
     displayHeight: displayBounds.height,
     calibrationFile,
