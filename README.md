@@ -1,5 +1,7 @@
 # Screen Eye Tracking
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20771714.svg)](https://doi.org/10.5281/zenodo.20771713)
+
 A desktop application that estimates where the user is looking on the selected display and renders a red gaze marker at the estimated hit position. It uses RetinaFace or DEIMv2 Wholebody49 for eye position detection and an ONNX gaze model for gaze estimation.
 
 The application is built as an Electron + React transparent overlay. It can run inference through the original Python / ONNX Runtime GPU backend, or fully inside Electron renderer with onnxruntime-web or LiteRT.js.
