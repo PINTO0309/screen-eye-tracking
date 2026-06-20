@@ -8,6 +8,11 @@ export const EYE_CLASS_ID = 17;
 export const AVERAGE_HEAD_WIDTH_M = 0.16;
 export const CAMERA_HORIZONTAL_FOV_DEG = 90;
 const IRIS_IDX_481 = [248, 252, 224, 228, 232, 236, 240, 244];
+const RETINAFACE_SCORE_THRESHOLD_FLOOR = 0.7;
+const RETINAFACE_CENTER_VARIANCE = 0.1;
+const RETINAFACE_SIZE_VARIANCE = 0.2;
+const RETINAFACE_PRIOR_COUNT = 12600;
+let retinaFacePriors: Float32Array | null = null;
 
 export interface Detection {
   classId: number;
@@ -130,6 +135,187 @@ export function parseRetinaFaceOutput(output: ArrayLike<number>, scoreThreshold:
     (a, b) => center(a)[0] - center(b)[0]
   );
   return { head, eyes };
+}
+
+export function parseRetinaFacePreNmsOutput(
+  boxes: ArrayLike<number>,
+  scores: ArrayLike<number>,
+  landms: ArrayLike<number>,
+  scoreThreshold: number
+): {
+  head: Detection | null;
+  eyes: Detection[];
+} {
+  const threshold = Math.max(scoreThreshold, RETINAFACE_SCORE_THRESHOLD_FLOOR);
+  const candidateCount = Math.min(Math.floor(boxes.length / 4), scores.length, Math.floor(landms.length / 10));
+  let bestIndex = -1;
+  let bestScore = -Infinity;
+  for (let index = 0; index < candidateCount; index += 1) {
+    const score = Number(scores[index]);
+    if (Number.isFinite(score) && score >= threshold && score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
+  if (bestIndex < 0) {
+    return { head: null, eyes: [] };
+  }
+
+  const boxOffset = bestIndex * 4;
+  const rawX1 = Number(boxes[boxOffset]);
+  const rawY1 = Number(boxes[boxOffset + 1]);
+  const rawX2 = Number(boxes[boxOffset + 2]);
+  const rawY2 = Number(boxes[boxOffset + 3]);
+  if (![rawX1, rawY1, rawX2, rawY2].every(Number.isFinite)) {
+    return { head: null, eyes: [] };
+  }
+  const x1 = clamp(rawX1, 0, CAMERA_WIDTH - 1);
+  const y1 = clamp(rawY1, 0, CAMERA_HEIGHT - 1);
+  const x2 = clamp(rawX2, 0, CAMERA_WIDTH - 1);
+  const y2 = clamp(rawY2, 0, CAMERA_HEIGHT - 1);
+  if (x2 <= x1 || y2 <= y1) {
+    return { head: null, eyes: [] };
+  }
+
+  const landmOffset = bestIndex * 10;
+  const rightEye: [number, number] = [Number(landms[landmOffset]), Number(landms[landmOffset + 1])];
+  const leftEye: [number, number] = [Number(landms[landmOffset + 2]), Number(landms[landmOffset + 3])];
+  if (!isFinitePoint(rightEye) || !isFinitePoint(leftEye)) {
+    return { head: null, eyes: [] };
+  }
+
+  const head: Detection = { classId: HEAD_CLASS_ID, score: bestScore, x1, y1, x2, y2 };
+  const eyeBoxSize = Math.max(10, width(head) * 0.08);
+  const eyes = [eyeDetection(leftEye, eyeBoxSize, bestScore), eyeDetection(rightEye, eyeBoxSize, bestScore)].sort(
+    (a, b) => center(a)[0] - center(b)[0]
+  );
+  return { head, eyes };
+}
+
+export function parseRetinaFaceRawOutput(
+  loc: ArrayLike<number>,
+  confLogits: ArrayLike<number>,
+  landms: ArrayLike<number>,
+  scoreThreshold: number
+): {
+  head: Detection | null;
+  eyes: Detection[];
+} {
+  const threshold = Math.max(scoreThreshold, RETINAFACE_SCORE_THRESHOLD_FLOOR);
+  const priors = getRetinaFacePriors();
+  const candidateCount = Math.min(
+    Math.floor(loc.length / 4),
+    Math.floor(confLogits.length / 2),
+    Math.floor(landms.length / 10),
+    RETINAFACE_PRIOR_COUNT
+  );
+  let bestIndex = -1;
+  let bestScore = -Infinity;
+  for (let index = 0; index < candidateCount; index += 1) {
+    const logitOffset = index * 2;
+    const score = sigmoid(Number(confLogits[logitOffset + 1]) - Number(confLogits[logitOffset]));
+    if (Number.isFinite(score) && score >= threshold && score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
+  if (bestIndex < 0) {
+    return { head: null, eyes: [] };
+  }
+
+  const priorOffset = bestIndex * 4;
+  const locOffset = bestIndex * 4;
+  const priorCx = priors[priorOffset];
+  const priorCy = priors[priorOffset + 1];
+  const priorW = priors[priorOffset + 2];
+  const priorH = priors[priorOffset + 3];
+  const cx = priorCx + Number(loc[locOffset]) * RETINAFACE_CENTER_VARIANCE * priorW;
+  const cy = priorCy + Number(loc[locOffset + 1]) * RETINAFACE_CENTER_VARIANCE * priorH;
+  const boxW = priorW * Math.exp(Number(loc[locOffset + 2]) * RETINAFACE_SIZE_VARIANCE);
+  const boxH = priorH * Math.exp(Number(loc[locOffset + 3]) * RETINAFACE_SIZE_VARIANCE);
+  const rawX1 = (cx - boxW * 0.5) * CAMERA_WIDTH;
+  const rawY1 = (cy - boxH * 0.5) * CAMERA_HEIGHT;
+  const rawX2 = (cx + boxW * 0.5) * CAMERA_WIDTH;
+  const rawY2 = (cy + boxH * 0.5) * CAMERA_HEIGHT;
+  if (![rawX1, rawY1, rawX2, rawY2].every(Number.isFinite)) {
+    return { head: null, eyes: [] };
+  }
+
+  const x1 = clamp(rawX1, 0, CAMERA_WIDTH - 1);
+  const y1 = clamp(rawY1, 0, CAMERA_HEIGHT - 1);
+  const x2 = clamp(rawX2, 0, CAMERA_WIDTH - 1);
+  const y2 = clamp(rawY2, 0, CAMERA_HEIGHT - 1);
+  if (x2 <= x1 || y2 <= y1) {
+    return { head: null, eyes: [] };
+  }
+
+  const landmOffset = bestIndex * 10;
+  const rightEye = decodeLandmark(landms, landmOffset, priorCx, priorCy, priorW, priorH);
+  const leftEye = decodeLandmark(landms, landmOffset + 2, priorCx, priorCy, priorW, priorH);
+  if (!isFinitePoint(rightEye) || !isFinitePoint(leftEye)) {
+    return { head: null, eyes: [] };
+  }
+
+  const head: Detection = { classId: HEAD_CLASS_ID, score: bestScore, x1, y1, x2, y2 };
+  const eyeBoxSize = Math.max(10, width(head) * 0.08);
+  const eyes = [eyeDetection(leftEye, eyeBoxSize, bestScore), eyeDetection(rightEye, eyeBoxSize, bestScore)].sort(
+    (a, b) => center(a)[0] - center(b)[0]
+  );
+  return { head, eyes };
+}
+
+function decodeLandmark(
+  landms: ArrayLike<number>,
+  offset: number,
+  priorCx: number,
+  priorCy: number,
+  priorW: number,
+  priorH: number
+): [number, number] {
+  return [
+    (priorCx + Number(landms[offset]) * RETINAFACE_CENTER_VARIANCE * priorW) * CAMERA_WIDTH,
+    (priorCy + Number(landms[offset + 1]) * RETINAFACE_CENTER_VARIANCE * priorH) * CAMERA_HEIGHT
+  ];
+}
+
+function sigmoid(value: number): number {
+  return value >= 0 ? 1 / (1 + Math.exp(-value)) : Math.exp(value) / (1 + Math.exp(value));
+}
+
+function getRetinaFacePriors(): Float32Array {
+  if (retinaFacePriors !== null) {
+    return retinaFacePriors;
+  }
+  const priors = new Float32Array(RETINAFACE_PRIOR_COUNT * 4);
+  const steps = [8, 16, 32];
+  const minSizes = [
+    [16, 32],
+    [64, 128],
+    [256, 512]
+  ];
+  let offset = 0;
+  for (let level = 0; level < steps.length; level += 1) {
+    const step = steps[level];
+    const featureHeight = Math.ceil(CAMERA_HEIGHT / step);
+    const featureWidth = Math.ceil(CAMERA_WIDTH / step);
+    for (let y = 0; y < featureHeight; y += 1) {
+      for (let x = 0; x < featureWidth; x += 1) {
+        for (const minSize of minSizes[level]) {
+          priors[offset] = ((x + 0.5) * step) / CAMERA_WIDTH;
+          priors[offset + 1] = ((y + 0.5) * step) / CAMERA_HEIGHT;
+          priors[offset + 2] = minSize / CAMERA_WIDTH;
+          priors[offset + 3] = minSize / CAMERA_HEIGHT;
+          offset += 4;
+        }
+      }
+    }
+  }
+  retinaFacePriors = priors;
+  return priors;
+}
+
+function isFinitePoint(point: [number, number]): boolean {
+  return Number.isFinite(point[0]) && Number.isFinite(point[1]);
 }
 
 function clamp(value: number, low: number, high: number): number {

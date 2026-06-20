@@ -8,7 +8,8 @@ import {
   type Detection,
   type GazeEstimate,
   type GazeCrop,
-  parseRetinaFaceOutput
+  parseRetinaFaceOutput,
+  parseRetinaFaceRawOutput
 } from "./core";
 
 export interface RuntimeModels {
@@ -110,6 +111,11 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
     throw error;
   }
   const detectorInputShape = Array.from(detector.getInputDetails()[0].shape);
+  const detectorOutputs = {
+    loc: liteRtOutputIndex(detector.getOutputDetails(), "loc", [1, 12600, 4]),
+    confLogits: liteRtOutputIndex(detector.getOutputDetails(), "conf_logits", [1, 12600, 2]),
+    landms: liteRtOutputIndex(detector.getOutputDetails(), "landms", [1, 12600, 10])
+  };
   const gazeInputShape = Array.from(gaze.getInputDetails()[0].shape);
   validateLiteRtInputShape("RetinaFace", detectorInputShape, [
     [1, 3, 480, 640],
@@ -131,14 +137,15 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
       const outputs = (await detector.run(input)) as InstanceType<typeof Tensor>[];
       input.delete();
       try {
-        const source = outputs[0];
-        const output = source.accelerator === "wasm" ? source : await source.moveTo("wasm");
+        const loc = await liteRtTensorData(outputs[detectorOutputs.loc]);
+        const confLogits = await liteRtTensorData(outputs[detectorOutputs.confLogits]);
+        const landms = await liteRtTensorData(outputs[detectorOutputs.landms]);
         try {
-          return parseRetinaFaceOutput(output.toTypedArray() as Float32Array, config.scoreThreshold);
+          return parseRetinaFaceRawOutput(loc.data, confLogits.data, landms.data, config.scoreThreshold);
         } finally {
-          if (output !== source) {
-            output.delete();
-          }
+          loc.delete();
+          confLogits.delete();
+          landms.delete();
         }
       } finally {
         for (const tensor of outputs) {
@@ -172,6 +179,40 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
     dispose() {
       detector.delete();
       gaze.delete();
+    }
+  };
+}
+
+function liteRtOutputIndex(
+  outputs: readonly { readonly name: string; readonly index: number; readonly shape: Int32Array }[],
+  name: string,
+  expectedShape: readonly number[]
+): number {
+  const detail = outputs.find((output) => output.name === name);
+  if (!detail) {
+    throw new Error(`RetinaFace LiteRT output ${name} was not found`);
+  }
+  const shape = Array.from(detail.shape);
+  if (!isShape(shape, expectedShape)) {
+    throw new Error(
+      `RetinaFace LiteRT output ${name} shape ${JSON.stringify(shape)} is not supported; expected ${JSON.stringify(
+        expectedShape
+      )}`
+    );
+  }
+  return detail.index;
+}
+
+async function liteRtTensorData<T extends { accelerator: string; moveTo(accelerator: "wasm"): Promise<T>; toTypedArray(): ArrayLike<number>; delete(): void }>(
+  source: T
+): Promise<{ data: ArrayLike<number>; delete(): void }> {
+  const output = source.accelerator === "wasm" ? source : await source.moveTo("wasm");
+  return {
+    data: output.toTypedArray(),
+    delete() {
+      if (output !== source) {
+        output.delete();
+      }
     }
   };
 }

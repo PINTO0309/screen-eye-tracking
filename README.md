@@ -55,9 +55,11 @@ public/models/gaze_1x3x160x160.onnx
 For `--runtime litert`, also place:
 
 ```text
-public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70_float32.tflite
+public/models/retinaface_mbn025_wo_postprocess_480x640_float32.tflite
 public/models/gaze_1x3x160x160_float32.tflite
 ```
+
+The LiteRT RetinaFace model has its dynamic postprocess tail removed. It must output `loc`, `conf_logits`, and `landms`; the renderer decodes boxes, scores, landmarks, and applies the lightweight selection step in JavaScript.
 
 If you use DEIMv2 as the detector, also place this model under `public/models/`.
 
@@ -91,9 +93,7 @@ To run inference fully in Electron without starting Python:
 ```bash
 # Recommended: onnxruntime-web
 pnpm dev -- --runtime onnxweb --calibrate --gaze-projection-mode binocular-screen
-# Not recommended: LiteRT.js
-# WebGPU isn't working properly, so it falls back to WASM, which makes it very slow.
-# Removing NMS from the model will probably make it work with WebGPU.
+# LiteRT.js
 pnpm dev -- --runtime litert --calibrate --gaze-projection-mode binocular-screen
 ```
 

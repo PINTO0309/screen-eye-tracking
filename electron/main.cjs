@@ -185,7 +185,7 @@ function webInferenceConfig(args, displayBounds, runtime) {
         args,
         "--retinaface-model",
         runtime === "litert"
-          ? "public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70_float32.tflite"
+          ? "public/models/retinaface_mbn025_wo_postprocess_480x640_float32.tflite"
           : "public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx"
       )
     )
