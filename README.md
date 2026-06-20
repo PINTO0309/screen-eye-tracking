@@ -14,6 +14,10 @@ The application is built as an Electron + React transparent overlay. It can run 
 
   <img width="843" height="458" alt="image" src="https://github.com/user-attachments/assets/c3e192f0-9cb2-4ab8-ae31-9c93ce0647eb" />
 
+## Arch
+
+<img width="1600" height="730" alt="framework-architecture" src="https://github.com/user-attachments/assets/133e5969-55bc-40c2-89cb-207ace82677c" />
+
 ## Setup
 
 Python is pinned to the 3.10.x series. This repository uses `.python-version` set to `3.10.12`.
