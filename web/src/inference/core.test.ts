@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { Calibration, DisplayGeometry, ScreenProjector, estimateGazeFromModelOutput, parseRetinaFaceOutput } from "./core";
+import {
+  Calibration,
+  DisplayGeometry,
+  ScreenProjector,
+  estimateGazeFromModelOutput,
+  parseRetinaFaceOutput,
+  parseRetinaFacePreNmsOutput,
+  parseRetinaFaceRawOutput
+} from "./core";
 import type { GazeEstimate } from "./core";
 
 describe("ScreenProjector", () => {
@@ -60,6 +68,81 @@ describe("RetinaFace parser", () => {
     expect(result.head?.score).toBeCloseTo(0.9);
     expect(result.eyes).toHaveLength(2);
     expect(result.eyes[0].x1).toBeLessThan(result.eyes[1].x1);
+  });
+
+  it("parses LiteRT pre-NMS outputs and keeps the highest scoring face", () => {
+    const boxes = new Float32Array(4 * 2);
+    const scores = new Float32Array(2);
+    const landms = new Float32Array(10 * 2);
+    boxes.set([10, 20, 110, 120], 0);
+    boxes.set([100, 120, 300, 340], 4);
+    scores.set([0.8, 0.95]);
+    landms.set([80, 50, 40, 50, 0, 0, 0, 0, 0, 0], 0);
+    landms.set([240, 180, 160, 180, 0, 0, 0, 0, 0, 0], 10);
+
+    const result = parseRetinaFacePreNmsOutput(boxes, scores, landms, 0.5);
+    expect(result.head?.score).toBeCloseTo(0.95);
+    expect(result.head?.x1).toBeCloseTo(100);
+    expect(result.eyes).toHaveLength(2);
+    expect(result.eyes[0].x1).toBeLessThan(result.eyes[1].x1);
+  });
+
+  it("keeps LiteRT pre-NMS threshold compatible with the embedded 0.70 model threshold", () => {
+    const result = parseRetinaFacePreNmsOutput(
+      new Float32Array([10, 20, 110, 120]),
+      new Float32Array([0.69]),
+      new Float32Array([80, 50, 40, 50, 0, 0, 0, 0, 0, 0]),
+      0.5
+    );
+    expect(result.head).toBeNull();
+    expect(result.eyes).toHaveLength(0);
+  });
+
+  it("returns no LiteRT pre-NMS detection for invalid boxes or incomplete landmarks", () => {
+    const invalidBox = parseRetinaFacePreNmsOutput(
+      new Float32Array([110, 120, 10, 20]),
+      new Float32Array([0.95]),
+      new Float32Array([80, 50, 40, 50, 0, 0, 0, 0, 0, 0]),
+      0.5
+    );
+    const incompleteLandmarks = parseRetinaFacePreNmsOutput(
+      new Float32Array([10, 20, 110, 120]),
+      new Float32Array([0.95]),
+      new Float32Array([80, 50, 40, 50]),
+      0.5
+    );
+    expect(invalidBox.head).toBeNull();
+    expect(incompleteLandmarks.head).toBeNull();
+  });
+
+  it("decodes LiteRT raw loc, logits, and landmarks", () => {
+    const loc = new Float32Array(4 * 2);
+    const logits = new Float32Array([0, 2, 0, 4]);
+    const landms = new Float32Array(10 * 2);
+    const result = parseRetinaFaceRawOutput(loc, logits, landms, 0.5);
+
+    expect(result.head?.score).toBeGreaterThan(0.98);
+    expect(result.head?.x1).toBeCloseTo(0);
+    expect(result.head?.y1).toBeCloseTo(0);
+    expect(result.head?.x2).toBeCloseTo(20);
+    expect(result.head?.y2).toBeCloseTo(20);
+    expect(result.eyes).toHaveLength(2);
+  });
+
+  it("keeps LiteRT raw threshold compatible with the embedded 0.70 model threshold", () => {
+    const result = parseRetinaFaceRawOutput(
+      new Float32Array(4),
+      new Float32Array([0, Math.log(0.69 / 0.31)]),
+      new Float32Array(10),
+      0.5
+    );
+    expect(result.head).toBeNull();
+  });
+
+  it("returns no LiteRT raw detection for invalid decoded boxes", () => {
+    const loc = new Float32Array([Number.NaN, 0, 0, 0]);
+    const result = parseRetinaFaceRawOutput(loc, new Float32Array([0, 4]), new Float32Array(10), 0.5);
+    expect(result.head).toBeNull();
   });
 });
 
