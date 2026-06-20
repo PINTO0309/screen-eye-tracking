@@ -4,6 +4,7 @@ import {
   DisplayGeometry,
   ScreenProjector,
   estimateGazeFromModelOutput,
+  parseCameraResolution,
   parseRetinaFaceOutput,
   parseRetinaFacePreNmsOutput,
   parseRetinaFaceRawOutput
@@ -26,6 +27,11 @@ describe("ScreenProjector", () => {
     const narrowFovProjector = new ScreenProjector(display, true, true, 0.5, 0, 1, 0.25, 60);
     expect(narrowFovProjector.cameraFovDeg).toBe(60);
     expect(narrowFovProjector.focalPx).toBeGreaterThan(projector.focalPx);
+  });
+
+  it("uses selected camera dimensions for the camera center", () => {
+    const fullHdProjector = new ScreenProjector(display, false, false, 0.5, 0.5, 1, 0.25, 90, 1920, 1080);
+    expect(fullHdProjector.project([960, 540], 0, 0, distanceM)).toEqual([0.5, 0.5]);
   });
 
   it("matches legacy when binocular-screen eye angles match", () => {
@@ -68,6 +74,16 @@ describe("RetinaFace parser", () => {
     expect(result.head?.score).toBeCloseTo(0.9);
     expect(result.eyes).toHaveLength(2);
     expect(result.eyes[0].x1).toBeLessThan(result.eyes[1].x1);
+  });
+
+  it("scales postprocessed RetinaFace output to selected camera dimensions", () => {
+    const rows = new Float32Array(17);
+    rows.set([0, 0, 0.9, 100, 120, 300, 340, 240, 180, 160, 180, 0, 0, 0, 0, 0, 0], 0);
+    const result = parseRetinaFaceOutput(rows, 0.5, 1280, 720);
+    expect(result.head?.x1).toBeCloseTo(200);
+    expect(result.head?.y1).toBeCloseTo(180);
+    expect(result.head?.x2).toBeCloseTo(600);
+    expect(result.head?.y2).toBeCloseTo(510);
   });
 
   it("parses LiteRT pre-NMS outputs and keeps the highest scoring face", () => {
@@ -143,6 +159,21 @@ describe("RetinaFace parser", () => {
     const loc = new Float32Array([Number.NaN, 0, 0, 0]);
     const result = parseRetinaFaceRawOutput(loc, new Float32Array([0, 4]), new Float32Array(10), 0.5);
     expect(result.head).toBeNull();
+  });
+});
+
+describe("Camera resolution parser", () => {
+  it("accepts presets, aliases, and dimensions", () => {
+    expect(parseCameraResolution("VGA")).toMatchObject({ name: "VGA", width: 640, height: 480 });
+    expect(parseCameraResolution("Full HD")).toMatchObject({ name: "Full HD", width: 1920, height: 1080 });
+    expect(parseCameraResolution("1080p")).toMatchObject({ name: "Full HD", width: 1920, height: 1080 });
+    expect(parseCameraResolution("1280x720")).toEqual({ width: 1280, height: 720 });
+  });
+
+  it("rejects duplicate aliases and invalid values", () => {
+    for (const value of ["2MP", "not-a-size", "1280x0"]) {
+      expect(() => parseCameraResolution(value)).toThrow();
+    }
   });
 });
 

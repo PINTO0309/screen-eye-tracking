@@ -5,6 +5,7 @@ import base64
 import json
 import math
 import queue
+import re
 import sys
 import threading
 import time
@@ -32,6 +33,43 @@ CAMERA_HEIGHT = 480
 CAMERA_HORIZONTAL_FOV_DEG = 90.0
 GAZE_INPUT_SIZE = 160
 IRIS_IDX_481 = np.asarray([248, 252, 224, 228, 232, 236, 240, 244], dtype=np.int64)
+
+
+@dataclass(frozen=True)
+class CameraResolution:
+    name: str | None
+    width: int
+    height: int
+
+
+DEFAULT_CAMERA_RESOLUTION = CameraResolution("VGA", CAMERA_WIDTH, CAMERA_HEIGHT)
+CAMERA_RESOLUTION_PRESETS: dict[str, CameraResolution] = {}
+for _name, _width, _height, _aliases in [
+    ("QQVGA", 160, 120, ("QQVGA",)),
+    ("QVGA", 320, 240, ("QVGA",)),
+    ("VGA", 640, 480, ("VGA",)),
+    ("SVGA", 800, 600, ("SVGA",)),
+    ("XGA", 1024, 768, ("XGA",)),
+    ("HD", 1280, 720, ("HD", "720p")),
+    ("SXGA", 1280, 1024, ("SXGA",)),
+    ("UXGA", 1600, 1200, ("UXGA",)),
+    ("Full HD", 1920, 1080, ("Full HD", "1080p")),
+    ("3MP", 2048, 1536, ("3MP",)),
+    ("QHD", 2560, 1440, ("QHD", "WQHD", "1440p")),
+    ("5MP", 2592, 1944, ("5MP",)),
+    ("6MP", 3072, 2048, ("6MP",)),
+    ("4K UHD", 3840, 2160, ("4K UHD",)),
+    ("DCI 4K", 4096, 2160, ("DCI 4K",)),
+    ("12MP", 4000, 3000, ("12MP",)),
+    ("5K", 5120, 2880, ("5K",)),
+    ("6K", 6144, 3456, ("6K",)),
+    ("8K UHD", 7680, 4320, ("8K UHD",)),
+    ("12K", 12288, 6480, ("12K",)),
+]:
+    _resolution = CameraResolution(_name, _width, _height)
+    for _alias in _aliases:
+        CAMERA_RESOLUTION_PRESETS["".join(ch.lower() for ch in _alias if ch.isalnum())] = _resolution
+REJECTED_CAMERA_RESOLUTION_NAMES = {"2mp", "4mp", "8mp"}
 
 
 @dataclass(frozen=True)
@@ -192,7 +230,9 @@ def emit_preview(
         cv2.putText(preview, ratio_text, (12, preview.shape[0] - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(preview, ratio_text, (12, preview.shape[0] - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (255, 255, 255), 1, cv2.LINE_AA)
 
-    preview = cv2.resize(preview, (320, 240), interpolation=cv2.INTER_AREA)
+    preview_width = 320
+    preview_height = max(1, int(round(preview.shape[0] * preview_width / max(1, preview.shape[1]))))
+    preview = cv2.resize(preview, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
     ok, encoded = cv2.imencode(".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
     if not ok:
         return
@@ -535,16 +575,20 @@ class ScreenProjector:
         eye_position_weight_x: float = 1.0,
         eye_position_weight_y: float = 0.25,
         camera_fov_deg: float = CAMERA_HORIZONTAL_FOV_DEG,
+        camera_width: int = CAMERA_WIDTH,
+        camera_height: int = CAMERA_HEIGHT,
     ) -> None:
         self.display = display
         self.flip_x = flip_x
         self.flip_y = flip_y
+        self.camera_width = max(1, int(camera_width))
+        self.camera_height = max(1, int(camera_height))
         self.camera_screen_x = clamp01(camera_screen_x)
         self.camera_screen_y = clamp01(camera_screen_y)
         self.eye_position_weight_x = max(0.0, min(1.0, eye_position_weight_x))
         self.eye_position_weight_y = max(0.0, min(1.0, eye_position_weight_y))
         self.camera_fov_deg = valid_camera_fov_deg(camera_fov_deg)
-        self.focal_px = CAMERA_WIDTH / (2.0 * math.tan(math.radians(self.camera_fov_deg) * 0.5))
+        self.focal_px = self.camera_width / (2.0 * math.tan(math.radians(self.camera_fov_deg) * 0.5))
 
     def distance_from_head(self, head: Detection, width_ratio: float = 1.0) -> float:
         corrected_width_px = max(1.0, head.width * width_ratio)
@@ -597,8 +641,8 @@ class ScreenProjector:
 
     def _eye_origin_m(self, eye_center_px: tuple[float, float], distance_m: float) -> tuple[float, float]:
         display_w_m, display_h_m = self.display.size_m
-        eye_x_m = (eye_center_px[0] - CAMERA_WIDTH * 0.5) * distance_m / self.focal_px * self.eye_position_weight_x
-        eye_y_m = (eye_center_px[1] - CAMERA_HEIGHT * 0.5) * distance_m / self.focal_px * self.eye_position_weight_y
+        eye_x_m = (eye_center_px[0] - self.camera_width * 0.5) * distance_m / self.focal_px * self.eye_position_weight_x
+        eye_y_m = (eye_center_px[1] - self.camera_height * 0.5) * distance_m / self.focal_px * self.eye_position_weight_y
         return display_w_m * self.camera_screen_x + eye_x_m, display_h_m * self.camera_screen_y + eye_y_m
 
     def _screen_hit_m(
@@ -696,11 +740,35 @@ def camera_fov_arg(value: str) -> float:
     return parsed
 
 
+def normalize_camera_resolution_name(value: str) -> str:
+    return "".join(ch.lower() for ch in value if ch.isalnum())
+
+
+def camera_resolution_arg(value: str) -> CameraResolution:
+    raw = value.strip()
+    size_match = re.fullmatch(r"(\d+)\s*[xX×]\s*(\d+)", raw)
+    if size_match is not None:
+        width = int(size_match.group(1))
+        height = int(size_match.group(2))
+        if width <= 0 or height <= 0:
+            raise argparse.ArgumentTypeError("camera resolution width and height must be positive integers")
+        return CameraResolution(None, width, height)
+
+    normalized = normalize_camera_resolution_name(raw)
+    if normalized in REJECTED_CAMERA_RESOLUTION_NAMES:
+        raise argparse.ArgumentTypeError(f"camera resolution alias is not accepted; use WIDTHxHEIGHT instead: {value}")
+    preset = CAMERA_RESOLUTION_PRESETS.get(normalized)
+    if preset is None:
+        raise argparse.ArgumentTypeError(f"unknown camera resolution: {value}")
+    return preset
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--detector", choices=["retinaface", "deim"], default="retinaface")
     parser.add_argument("--backend", choices=["tensorrt", "cuda", "cpu"], default="tensorrt")
     parser.add_argument("--camera", default="0")
+    parser.add_argument("--camera-resolution", type=camera_resolution_arg, default=DEFAULT_CAMERA_RESOLUTION)
     parser.add_argument("--camera-fov", type=camera_fov_arg, default=CAMERA_HORIZONTAL_FOV_DEG)
     parser.add_argument("--score-threshold", type=float, default=0.50)
     parser.add_argument("--display-size-inch", type=display_size_arg, default=31.5)
@@ -755,8 +823,15 @@ def handle_commands(
             calibration.capture(latest_raw, (clamp01(float(target[0])), clamp01(float(target[1]))))
 
 
+def idle_command_loop(commands: queue.Queue[dict[str, Any]], calibration: Calibration) -> None:
+    while True:
+        handle_commands(commands, calibration, None)
+        time.sleep(0.25)
+
+
 def main() -> None:
     args = parse_args()
+    camera_resolution: CameraResolution = args.camera_resolution
     display = DisplayGeometry(args.display_width, args.display_height, args.display_size_inch)
     calibration = Calibration(args.calibration_file)
     commands: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -780,6 +855,8 @@ def main() -> None:
         eye_position_weight_x=args.eye_position_weight_x,
         eye_position_weight_y=args.eye_position_weight_y,
         camera_fov_deg=args.camera_fov,
+        camera_width=camera_resolution.width,
+        camera_height=camera_resolution.height,
     )
     emit(
         {
@@ -791,6 +868,9 @@ def main() -> None:
             "detector_providers": detector.providers,
             "head_face_width_ratio": head_face_width_ratio,
             "camera_fov_deg": projector.camera_fov_deg,
+            "camera_resolution_name": camera_resolution.name,
+            "camera_width": camera_resolution.width,
+            "camera_height": camera_resolution.height,
             "camera_screen_x": projector.camera_screen_x,
             "camera_screen_y": projector.camera_screen_y,
             "eye_position_weight_x": projector.eye_position_weight_x,
@@ -801,13 +881,31 @@ def main() -> None:
     )
 
     cap = cv2.VideoCapture(camera_arg(args.camera))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, camera_resolution.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_resolution.height)
     if not cap.isOpened():
         emit({"type": "status", "level": "error", "message": f"Camera could not be opened: {args.camera}"})
-        while True:
-            handle_commands(commands, calibration, None)
-            time.sleep(0.25)
+        idle_command_loop(commands, calibration)
+    ok, first_frame = cap.read()
+    if not ok:
+        emit({"type": "status", "level": "error", "message": "Camera frame is not available"})
+        idle_command_loop(commands, calibration)
+    actual_height, actual_width = first_frame.shape[:2]
+    if actual_width != camera_resolution.width or actual_height != camera_resolution.height:
+        emit(
+            {
+                "type": "status",
+                "level": "error",
+                "message": (
+                    f"Camera returned {actual_width}x{actual_height}, "
+                    f"expected {camera_resolution.width}x{camera_resolution.height}"
+                ),
+                "camera_resolution_name": camera_resolution.name,
+                "camera_width": camera_resolution.width,
+                "camera_height": camera_resolution.height,
+            }
+        )
+        idle_command_loop(commands, calibration)
 
     smoothed: tuple[float, float] | None = None
     latest_raw: tuple[float, float] | None = None
@@ -815,11 +913,16 @@ def main() -> None:
     last_preview = 0.0
     last_projection_warning = 0.0
     preview_interval = 1.0 / max(0.5, args.preview_fps)
+    pending_frame: np.ndarray | None = first_frame
 
     try:
         while True:
             handle_commands(commands, calibration, latest_raw)
-            ok, frame = cap.read()
+            if pending_frame is None:
+                ok, frame = cap.read()
+            else:
+                ok, frame = True, pending_frame
+                pending_frame = None
             if not ok:
                 now = time.monotonic()
                 if now - last_status > 1.0:
@@ -827,7 +930,6 @@ def main() -> None:
                     last_status = now
                 time.sleep(0.05)
                 continue
-            frame = cv2.resize(frame, (CAMERA_WIDTH, CAMERA_HEIGHT), interpolation=cv2.INTER_LINEAR)
             try:
                 head, eyes = detector.detect(frame)
                 now = time.monotonic()

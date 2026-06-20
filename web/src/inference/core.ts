@@ -2,6 +2,8 @@ import type { BackendMessage, GazeProjectionMode } from "../global";
 
 export const CAMERA_WIDTH = 640;
 export const CAMERA_HEIGHT = 480;
+export const RETINAFACE_INPUT_WIDTH = 640;
+export const RETINAFACE_INPUT_HEIGHT = 480;
 export const GAZE_INPUT_SIZE = 160;
 export const HEAD_CLASS_ID = 7;
 export const EYE_CLASS_ID = 17;
@@ -13,6 +15,70 @@ const RETINAFACE_CENTER_VARIANCE = 0.1;
 const RETINAFACE_SIZE_VARIANCE = 0.2;
 const RETINAFACE_PRIOR_COUNT = 12600;
 let retinaFacePriors: Float32Array | null = null;
+
+export interface CameraResolution {
+  name?: string;
+  width: number;
+  height: number;
+}
+
+export const DEFAULT_CAMERA_RESOLUTION: CameraResolution = { name: "VGA", width: CAMERA_WIDTH, height: CAMERA_HEIGHT };
+
+const CAMERA_RESOLUTION_PRESETS = new Map<string, CameraResolution>();
+for (const [name, width, height, aliases] of [
+  ["QQVGA", 160, 120, ["QQVGA"]],
+  ["QVGA", 320, 240, ["QVGA"]],
+  ["VGA", 640, 480, ["VGA"]],
+  ["SVGA", 800, 600, ["SVGA"]],
+  ["XGA", 1024, 768, ["XGA"]],
+  ["HD", 1280, 720, ["HD", "720p"]],
+  ["SXGA", 1280, 1024, ["SXGA"]],
+  ["UXGA", 1600, 1200, ["UXGA"]],
+  ["Full HD", 1920, 1080, ["Full HD", "1080p"]],
+  ["3MP", 2048, 1536, ["3MP"]],
+  ["QHD", 2560, 1440, ["QHD", "WQHD", "1440p"]],
+  ["5MP", 2592, 1944, ["5MP"]],
+  ["6MP", 3072, 2048, ["6MP"]],
+  ["4K UHD", 3840, 2160, ["4K UHD"]],
+  ["DCI 4K", 4096, 2160, ["DCI 4K"]],
+  ["12MP", 4000, 3000, ["12MP"]],
+  ["5K", 5120, 2880, ["5K"]],
+  ["6K", 6144, 3456, ["6K"]],
+  ["8K UHD", 7680, 4320, ["8K UHD"]],
+  ["12K", 12288, 6480, ["12K"]]
+] as const) {
+  const resolution = { name, width, height };
+  for (const alias of aliases) {
+    CAMERA_RESOLUTION_PRESETS.set(normalizeCameraResolutionName(alias), resolution);
+  }
+}
+const REJECTED_CAMERA_RESOLUTION_NAMES = new Set(["2mp", "4mp", "8mp"]);
+
+export function normalizeCameraResolutionName(value: string): string {
+  return Array.from(value.toLowerCase()).filter((ch) => /[a-z0-9]/.test(ch)).join("");
+}
+
+export function parseCameraResolution(value: string): CameraResolution {
+  const raw = value.trim();
+  const sizeMatch = raw.match(/^(\d+)\s*[xX×]\s*(\d+)$/);
+  if (sizeMatch) {
+    const width = Number.parseInt(sizeMatch[1], 10);
+    const height = Number.parseInt(sizeMatch[2], 10);
+    if (width <= 0 || height <= 0) {
+      throw new Error("camera resolution width and height must be positive integers");
+    }
+    return { width, height };
+  }
+  const normalized = normalizeCameraResolutionName(raw);
+  if (REJECTED_CAMERA_RESOLUTION_NAMES.has(normalized)) {
+    throw new Error(`camera resolution alias is not accepted; use WIDTHxHEIGHT instead: ${value}`);
+  }
+  const preset = CAMERA_RESOLUTION_PRESETS.get(normalized);
+  if (!preset) {
+    throw new Error(`unknown camera resolution: ${value}`);
+  }
+  return preset;
+}
 
 export interface Detection {
   classId: number;
@@ -72,13 +138,15 @@ function hypot(x: number, y: number): number {
 }
 
 export function createRetinaFaceInput(frame: ImageData): Float32Array {
-  const input = new Float32Array(1 * 3 * CAMERA_HEIGHT * CAMERA_WIDTH);
-  const plane = CAMERA_HEIGHT * CAMERA_WIDTH;
+  const input = new Float32Array(1 * 3 * RETINAFACE_INPUT_HEIGHT * RETINAFACE_INPUT_WIDTH);
+  const plane = RETINAFACE_INPUT_HEIGHT * RETINAFACE_INPUT_WIDTH;
   const data = frame.data;
-  for (let y = 0; y < CAMERA_HEIGHT; y += 1) {
-    for (let x = 0; x < CAMERA_WIDTH; x += 1) {
-      const src = (y * frame.width + x) * 4;
-      const dst = y * CAMERA_WIDTH + x;
+  for (let y = 0; y < RETINAFACE_INPUT_HEIGHT; y += 1) {
+    const srcY = Math.min(frame.height - 1, Math.floor(((y + 0.5) * frame.height) / RETINAFACE_INPUT_HEIGHT));
+    for (let x = 0; x < RETINAFACE_INPUT_WIDTH; x += 1) {
+      const srcX = Math.min(frame.width - 1, Math.floor(((x + 0.5) * frame.width) / RETINAFACE_INPUT_WIDTH));
+      const src = (srcY * frame.width + srcX) * 4;
+      const dst = y * RETINAFACE_INPUT_WIDTH + x;
       input[dst] = data[src] - 104;
       input[plane + dst] = data[src + 1] - 117;
       input[plane * 2 + dst] = data[src + 2] - 123;
@@ -88,12 +156,14 @@ export function createRetinaFaceInput(frame: ImageData): Float32Array {
 }
 
 export function createRetinaFaceInputNhwc(frame: ImageData): Float32Array {
-  const input = new Float32Array(1 * CAMERA_HEIGHT * CAMERA_WIDTH * 3);
+  const input = new Float32Array(1 * RETINAFACE_INPUT_HEIGHT * RETINAFACE_INPUT_WIDTH * 3);
   const data = frame.data;
-  for (let y = 0; y < CAMERA_HEIGHT; y += 1) {
-    for (let x = 0; x < CAMERA_WIDTH; x += 1) {
-      const src = (y * frame.width + x) * 4;
-      const dst = (y * CAMERA_WIDTH + x) * 3;
+  for (let y = 0; y < RETINAFACE_INPUT_HEIGHT; y += 1) {
+    const srcY = Math.min(frame.height - 1, Math.floor(((y + 0.5) * frame.height) / RETINAFACE_INPUT_HEIGHT));
+    for (let x = 0; x < RETINAFACE_INPUT_WIDTH; x += 1) {
+      const srcX = Math.min(frame.width - 1, Math.floor(((x + 0.5) * frame.width) / RETINAFACE_INPUT_WIDTH));
+      const src = (srcY * frame.width + srcX) * 4;
+      const dst = (y * RETINAFACE_INPUT_WIDTH + x) * 3;
       input[dst] = data[src] - 104;
       input[dst + 1] = data[src + 1] - 117;
       input[dst + 2] = data[src + 2] - 123;
@@ -102,7 +172,12 @@ export function createRetinaFaceInputNhwc(frame: ImageData): Float32Array {
   return input;
 }
 
-export function parseRetinaFaceOutput(output: ArrayLike<number>, scoreThreshold: number): {
+export function parseRetinaFaceOutput(
+  output: ArrayLike<number>,
+  scoreThreshold: number,
+  targetWidth = CAMERA_WIDTH,
+  targetHeight = CAMERA_HEIGHT
+): {
   head: Detection | null;
   eyes: Detection[];
 } {
@@ -120,16 +195,22 @@ export function parseRetinaFaceOutput(output: ArrayLike<number>, scoreThreshold:
     return { head: null, eyes: [] };
   }
 
-  const x1 = clamp(Number(output[bestOffset + 3]), 0, CAMERA_WIDTH - 1);
-  const y1 = clamp(Number(output[bestOffset + 4]), 0, CAMERA_HEIGHT - 1);
-  const x2 = clamp(Number(output[bestOffset + 5]), 0, CAMERA_WIDTH - 1);
-  const y2 = clamp(Number(output[bestOffset + 6]), 0, CAMERA_HEIGHT - 1);
+  const x1 = scaleRetinaFaceX(Number(output[bestOffset + 3]), targetWidth);
+  const y1 = scaleRetinaFaceY(Number(output[bestOffset + 4]), targetHeight);
+  const x2 = scaleRetinaFaceX(Number(output[bestOffset + 5]), targetWidth);
+  const y2 = scaleRetinaFaceY(Number(output[bestOffset + 6]), targetHeight);
   if (x2 <= x1 || y2 <= y1) {
     return { head: null, eyes: [] };
   }
   const head: Detection = { classId: HEAD_CLASS_ID, score: bestScore, x1, y1, x2, y2 };
-  const rightEye: [number, number] = [Number(output[bestOffset + 7]), Number(output[bestOffset + 8])];
-  const leftEye: [number, number] = [Number(output[bestOffset + 9]), Number(output[bestOffset + 10])];
+  const rightEye: [number, number] = [
+    scaleRetinaFaceX(Number(output[bestOffset + 7]), targetWidth),
+    scaleRetinaFaceY(Number(output[bestOffset + 8]), targetHeight)
+  ];
+  const leftEye: [number, number] = [
+    scaleRetinaFaceX(Number(output[bestOffset + 9]), targetWidth),
+    scaleRetinaFaceY(Number(output[bestOffset + 10]), targetHeight)
+  ];
   const eyeBoxSize = Math.max(10, width(head) * 0.08);
   const eyes = [eyeDetection(leftEye, eyeBoxSize, bestScore), eyeDetection(rightEye, eyeBoxSize, bestScore)].sort(
     (a, b) => center(a)[0] - center(b)[0]
@@ -141,7 +222,9 @@ export function parseRetinaFacePreNmsOutput(
   boxes: ArrayLike<number>,
   scores: ArrayLike<number>,
   landms: ArrayLike<number>,
-  scoreThreshold: number
+  scoreThreshold: number,
+  targetWidth = CAMERA_WIDTH,
+  targetHeight = CAMERA_HEIGHT
 ): {
   head: Detection | null;
   eyes: Detection[];
@@ -169,17 +252,23 @@ export function parseRetinaFacePreNmsOutput(
   if (![rawX1, rawY1, rawX2, rawY2].every(Number.isFinite)) {
     return { head: null, eyes: [] };
   }
-  const x1 = clamp(rawX1, 0, CAMERA_WIDTH - 1);
-  const y1 = clamp(rawY1, 0, CAMERA_HEIGHT - 1);
-  const x2 = clamp(rawX2, 0, CAMERA_WIDTH - 1);
-  const y2 = clamp(rawY2, 0, CAMERA_HEIGHT - 1);
+  const x1 = scaleRetinaFaceX(rawX1, targetWidth);
+  const y1 = scaleRetinaFaceY(rawY1, targetHeight);
+  const x2 = scaleRetinaFaceX(rawX2, targetWidth);
+  const y2 = scaleRetinaFaceY(rawY2, targetHeight);
   if (x2 <= x1 || y2 <= y1) {
     return { head: null, eyes: [] };
   }
 
   const landmOffset = bestIndex * 10;
-  const rightEye: [number, number] = [Number(landms[landmOffset]), Number(landms[landmOffset + 1])];
-  const leftEye: [number, number] = [Number(landms[landmOffset + 2]), Number(landms[landmOffset + 3])];
+  const rightEye: [number, number] = [
+    scaleRetinaFaceX(Number(landms[landmOffset]), targetWidth),
+    scaleRetinaFaceY(Number(landms[landmOffset + 1]), targetHeight)
+  ];
+  const leftEye: [number, number] = [
+    scaleRetinaFaceX(Number(landms[landmOffset + 2]), targetWidth),
+    scaleRetinaFaceY(Number(landms[landmOffset + 3]), targetHeight)
+  ];
   if (!isFinitePoint(rightEye) || !isFinitePoint(leftEye)) {
     return { head: null, eyes: [] };
   }
@@ -196,7 +285,9 @@ export function parseRetinaFaceRawOutput(
   loc: ArrayLike<number>,
   confLogits: ArrayLike<number>,
   landms: ArrayLike<number>,
-  scoreThreshold: number
+  scoreThreshold: number,
+  targetWidth = CAMERA_WIDTH,
+  targetHeight = CAMERA_HEIGHT
 ): {
   head: Detection | null;
   eyes: Detection[];
@@ -233,25 +324,25 @@ export function parseRetinaFaceRawOutput(
   const cy = priorCy + Number(loc[locOffset + 1]) * RETINAFACE_CENTER_VARIANCE * priorH;
   const boxW = priorW * Math.exp(Number(loc[locOffset + 2]) * RETINAFACE_SIZE_VARIANCE);
   const boxH = priorH * Math.exp(Number(loc[locOffset + 3]) * RETINAFACE_SIZE_VARIANCE);
-  const rawX1 = (cx - boxW * 0.5) * CAMERA_WIDTH;
-  const rawY1 = (cy - boxH * 0.5) * CAMERA_HEIGHT;
-  const rawX2 = (cx + boxW * 0.5) * CAMERA_WIDTH;
-  const rawY2 = (cy + boxH * 0.5) * CAMERA_HEIGHT;
+  const rawX1 = (cx - boxW * 0.5) * RETINAFACE_INPUT_WIDTH;
+  const rawY1 = (cy - boxH * 0.5) * RETINAFACE_INPUT_HEIGHT;
+  const rawX2 = (cx + boxW * 0.5) * RETINAFACE_INPUT_WIDTH;
+  const rawY2 = (cy + boxH * 0.5) * RETINAFACE_INPUT_HEIGHT;
   if (![rawX1, rawY1, rawX2, rawY2].every(Number.isFinite)) {
     return { head: null, eyes: [] };
   }
 
-  const x1 = clamp(rawX1, 0, CAMERA_WIDTH - 1);
-  const y1 = clamp(rawY1, 0, CAMERA_HEIGHT - 1);
-  const x2 = clamp(rawX2, 0, CAMERA_WIDTH - 1);
-  const y2 = clamp(rawY2, 0, CAMERA_HEIGHT - 1);
+  const x1 = scaleRetinaFaceX(rawX1, targetWidth);
+  const y1 = scaleRetinaFaceY(rawY1, targetHeight);
+  const x2 = scaleRetinaFaceX(rawX2, targetWidth);
+  const y2 = scaleRetinaFaceY(rawY2, targetHeight);
   if (x2 <= x1 || y2 <= y1) {
     return { head: null, eyes: [] };
   }
 
   const landmOffset = bestIndex * 10;
-  const rightEye = decodeLandmark(landms, landmOffset, priorCx, priorCy, priorW, priorH);
-  const leftEye = decodeLandmark(landms, landmOffset + 2, priorCx, priorCy, priorW, priorH);
+  const rightEye = decodeLandmark(landms, landmOffset, priorCx, priorCy, priorW, priorH, targetWidth, targetHeight);
+  const leftEye = decodeLandmark(landms, landmOffset + 2, priorCx, priorCy, priorW, priorH, targetWidth, targetHeight);
   if (!isFinitePoint(rightEye) || !isFinitePoint(leftEye)) {
     return { head: null, eyes: [] };
   }
@@ -270,12 +361,28 @@ function decodeLandmark(
   priorCx: number,
   priorCy: number,
   priorW: number,
-  priorH: number
+  priorH: number,
+  targetWidth: number,
+  targetHeight: number
 ): [number, number] {
   return [
-    (priorCx + Number(landms[offset]) * RETINAFACE_CENTER_VARIANCE * priorW) * CAMERA_WIDTH,
-    (priorCy + Number(landms[offset + 1]) * RETINAFACE_CENTER_VARIANCE * priorH) * CAMERA_HEIGHT
+    scaleRetinaFaceX(
+      (priorCx + Number(landms[offset]) * RETINAFACE_CENTER_VARIANCE * priorW) * RETINAFACE_INPUT_WIDTH,
+      targetWidth
+    ),
+    scaleRetinaFaceY(
+      (priorCy + Number(landms[offset + 1]) * RETINAFACE_CENTER_VARIANCE * priorH) * RETINAFACE_INPUT_HEIGHT,
+      targetHeight
+    )
   ];
+}
+
+function scaleRetinaFaceX(value: number, targetWidth: number): number {
+  return clamp((value * targetWidth) / RETINAFACE_INPUT_WIDTH, 0, targetWidth - 1);
+}
+
+function scaleRetinaFaceY(value: number, targetHeight: number): number {
+  return clamp((value * targetHeight) / RETINAFACE_INPUT_HEIGHT, 0, targetHeight - 1);
 }
 
 function sigmoid(value: number): number {
@@ -296,15 +403,15 @@ function getRetinaFacePriors(): Float32Array {
   let offset = 0;
   for (let level = 0; level < steps.length; level += 1) {
     const step = steps[level];
-    const featureHeight = Math.ceil(CAMERA_HEIGHT / step);
-    const featureWidth = Math.ceil(CAMERA_WIDTH / step);
+    const featureHeight = Math.ceil(RETINAFACE_INPUT_HEIGHT / step);
+    const featureWidth = Math.ceil(RETINAFACE_INPUT_WIDTH / step);
     for (let y = 0; y < featureHeight; y += 1) {
       for (let x = 0; x < featureWidth; x += 1) {
         for (const minSize of minSizes[level]) {
-          priors[offset] = ((x + 0.5) * step) / CAMERA_WIDTH;
-          priors[offset + 1] = ((y + 0.5) * step) / CAMERA_HEIGHT;
-          priors[offset + 2] = minSize / CAMERA_WIDTH;
-          priors[offset + 3] = minSize / CAMERA_HEIGHT;
+          priors[offset] = ((x + 0.5) * step) / RETINAFACE_INPUT_WIDTH;
+          priors[offset + 1] = ((y + 0.5) * step) / RETINAFACE_INPUT_HEIGHT;
+          priors[offset + 2] = minSize / RETINAFACE_INPUT_WIDTH;
+          priors[offset + 3] = minSize / RETINAFACE_INPUT_HEIGHT;
           offset += 4;
         }
       }
@@ -512,6 +619,8 @@ export class ScreenProjector {
   readonly eyePositionWeightY: number;
   readonly cameraFovDeg: number;
   readonly focalPx: number;
+  readonly cameraWidth: number;
+  readonly cameraHeight: number;
 
   constructor(
     readonly display: DisplayGeometry,
@@ -521,14 +630,18 @@ export class ScreenProjector {
     cameraScreenY = 0,
     eyePositionWeightX = 1,
     eyePositionWeightY = 0.25,
-    cameraFovDeg = CAMERA_HORIZONTAL_FOV_DEG
+    cameraFovDeg = CAMERA_HORIZONTAL_FOV_DEG,
+    cameraWidth = CAMERA_WIDTH,
+    cameraHeight = CAMERA_HEIGHT
   ) {
+    this.cameraWidth = Math.max(1, Math.trunc(cameraWidth));
+    this.cameraHeight = Math.max(1, Math.trunc(cameraHeight));
     this.cameraScreenX = clamp01(cameraScreenX);
     this.cameraScreenY = clamp01(cameraScreenY);
     this.eyePositionWeightX = clamp(eyePositionWeightX, 0, 1);
     this.eyePositionWeightY = clamp(eyePositionWeightY, 0, 1);
     this.cameraFovDeg = validCameraFovDeg(cameraFovDeg);
-    this.focalPx = CAMERA_WIDTH / (2 * Math.tan((this.cameraFovDeg * Math.PI) / 180 * 0.5));
+    this.focalPx = this.cameraWidth / (2 * Math.tan((this.cameraFovDeg * Math.PI) / 180 * 0.5));
   }
 
   distanceFromHead(head: Detection, widthRatio = 1): number {
@@ -578,8 +691,8 @@ export class ScreenProjector {
 
   private eyeOriginM(eyeCenterPx: [number, number], distanceM: number): [number, number] {
     const [displayWM, displayHM] = this.display.sizeM;
-    const eyeXM = ((eyeCenterPx[0] - CAMERA_WIDTH * 0.5) * distanceM) / this.focalPx * this.eyePositionWeightX;
-    const eyeYM = ((eyeCenterPx[1] - CAMERA_HEIGHT * 0.5) * distanceM) / this.focalPx * this.eyePositionWeightY;
+    const eyeXM = ((eyeCenterPx[0] - this.cameraWidth * 0.5) * distanceM) / this.focalPx * this.eyePositionWeightX;
+    const eyeYM = ((eyeCenterPx[1] - this.cameraHeight * 0.5) * distanceM) / this.focalPx * this.eyePositionWeightY;
     return [displayWM * this.cameraScreenX + eyeXM, displayHM * this.cameraScreenY + eyeYM];
   }
 
@@ -827,8 +940,8 @@ export function createPreviewImage(
   gazeAngles?: [number, number]
 ): string {
   const source = document.createElement("canvas");
-  source.width = CAMERA_WIDTH;
-  source.height = CAMERA_HEIGHT;
+  source.width = frame.width;
+  source.height = frame.height;
   const sourceCtx = source.getContext("2d");
   if (!sourceCtx) {
     return "";
@@ -852,11 +965,11 @@ export function createPreviewImage(
     strokeText(sourceCtx, message, 12, 28, 22);
   }
   if (widthRatio !== null) {
-    strokeText(sourceCtx, `Head/Face ${widthRatio.toFixed(3)}x`, 12, CAMERA_HEIGHT - 14, 18);
+    strokeText(sourceCtx, `Head/Face ${widthRatio.toFixed(3)}x`, 12, frame.height - 14, 18);
   }
   const preview = document.createElement("canvas");
   preview.width = 320;
-  preview.height = 240;
+  preview.height = Math.max(1, Math.round((frame.height * preview.width) / Math.max(1, frame.width)));
   const previewCtx = preview.getContext("2d");
   if (!previewCtx) {
     return "";
@@ -889,7 +1002,7 @@ function strokeText(
 }
 
 function drawGazeLines(ctx: CanvasRenderingContext2D, eyes: Detection[], yawDeg: number, pitchDeg: number): void {
-  const diag = Math.sqrt(CAMERA_WIDTH * CAMERA_HEIGHT);
+  const diag = Math.sqrt(ctx.canvas.width * ctx.canvas.height);
   const length = 0.4 * diag;
   const dx = length * Math.sin((yawDeg * Math.PI) / 180);
   const dy = length * Math.sin((-pitchDeg * Math.PI) / 180);

@@ -69,6 +69,67 @@ function readCameraFovOption(args) {
   return value > 0 && value < 180 ? value : 90;
 }
 
+const defaultCameraResolution = { name: "VGA", width: 640, height: 480 };
+const rejectedCameraResolutionNames = new Set(["2mp", "4mp", "8mp"]);
+const cameraResolutionPresets = new Map();
+for (const [name, width, height, aliases] of [
+  ["QQVGA", 160, 120, ["QQVGA"]],
+  ["QVGA", 320, 240, ["QVGA"]],
+  ["VGA", 640, 480, ["VGA"]],
+  ["SVGA", 800, 600, ["SVGA"]],
+  ["XGA", 1024, 768, ["XGA"]],
+  ["HD", 1280, 720, ["HD", "720p"]],
+  ["SXGA", 1280, 1024, ["SXGA"]],
+  ["UXGA", 1600, 1200, ["UXGA"]],
+  ["Full HD", 1920, 1080, ["Full HD", "1080p"]],
+  ["3MP", 2048, 1536, ["3MP"]],
+  ["QHD", 2560, 1440, ["QHD", "WQHD", "1440p"]],
+  ["5MP", 2592, 1944, ["5MP"]],
+  ["6MP", 3072, 2048, ["6MP"]],
+  ["4K UHD", 3840, 2160, ["4K UHD"]],
+  ["DCI 4K", 4096, 2160, ["DCI 4K"]],
+  ["12MP", 4000, 3000, ["12MP"]],
+  ["5K", 5120, 2880, ["5K"]],
+  ["6K", 6144, 3456, ["6K"]],
+  ["8K UHD", 7680, 4320, ["8K UHD"]],
+  ["12K", 12288, 6480, ["12K"]]
+]) {
+  const resolution = { name, width, height };
+  for (const alias of aliases) {
+    cameraResolutionPresets.set(normalizeCameraResolutionName(alias), resolution);
+  }
+}
+
+function normalizeCameraResolutionName(value) {
+  return Array.from(value.toLowerCase()).filter((ch) => /[a-z0-9]/.test(ch)).join("");
+}
+
+function parseCameraResolution(value) {
+  const raw = String(value).trim();
+  const sizeMatch = raw.match(/^(\d+)\s*[xX×]\s*(\d+)$/);
+  if (sizeMatch) {
+    const width = Number.parseInt(sizeMatch[1], 10);
+    const height = Number.parseInt(sizeMatch[2], 10);
+    if (width <= 0 || height <= 0) {
+      throw new Error("camera resolution width and height must be positive integers");
+    }
+    return { width, height };
+  }
+  const normalized = normalizeCameraResolutionName(raw);
+  if (rejectedCameraResolutionNames.has(normalized)) {
+    throw new Error(`camera resolution alias is not accepted; use WIDTHxHEIGHT instead: ${value}`);
+  }
+  const preset = cameraResolutionPresets.get(normalized);
+  if (!preset) {
+    throw new Error(`unknown camera resolution: ${value}`);
+  }
+  return preset;
+}
+
+function readCameraResolutionOption(args) {
+  return parseCameraResolution(readOption(args, "--camera-resolution", defaultCameraResolution.name));
+}
+
 function resolveRuntime(args) {
   const runtime = readOption(args, "--runtime", "python");
   return ["python", "onnxweb", "litert"].includes(runtime) ? runtime : "python";
@@ -141,6 +202,7 @@ function backendArgs(args, displayBounds) {
     "--detector",
     "--backend",
     "--camera",
+    "--camera-resolution",
     "--camera-fov",
     "--score-threshold",
     "--display-size-inch",
@@ -181,6 +243,7 @@ function backendArgs(args, displayBounds) {
 
 function webInferenceConfig(args, displayBounds, runtime) {
   const detector = readOption(args, "--detector", "retinaface");
+  const cameraResolution = readCameraResolutionOption(args);
   const calibrationFile = resolveRepoPath(readOption(args, "--calibration-file", defaultCalibrationFile));
   const retinafaceModel = resolveRepoPath(
     readOption(
@@ -207,6 +270,9 @@ function webInferenceConfig(args, displayBounds, runtime) {
     detector,
     backend: readOption(args, "--backend", "tensorrt"),
     camera: readOption(args, "--camera", "0"),
+    cameraResolutionName: cameraResolution.name,
+    cameraWidth: cameraResolution.width,
+    cameraHeight: cameraResolution.height,
     cameraFov: readCameraFovOption(args),
     scoreThreshold: readNumberOption(args, "--score-threshold", 0.5),
     displaySizeInch: readPositiveNumberOption(args, "--display-size-inch", 31.5),

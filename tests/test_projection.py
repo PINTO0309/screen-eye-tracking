@@ -1,7 +1,8 @@
+import argparse
 import math
 import unittest
 
-from screen_eye_tracking.backend import Detection, DisplayGeometry, GazeEstimate, ScreenProjector
+from screen_eye_tracking.backend import Detection, DisplayGeometry, GazeEstimate, ScreenProjector, camera_resolution_arg
 
 
 class ScreenProjectorTest(unittest.TestCase):
@@ -29,6 +30,19 @@ class ScreenProjectorTest(unittest.TestCase):
 
         self.assertEqual(narrow_fov_projector.camera_fov_deg, 60.0)
         self.assertGreater(narrow_fov_projector.focal_px, self.projector.focal_px)
+
+    def test_full_hd_camera_center_projects_to_screen_center(self) -> None:
+        projector = ScreenProjector(
+            self.display,
+            flip_x=False,
+            flip_y=False,
+            camera_screen_x=0.5,
+            camera_screen_y=0.5,
+            camera_width=1920,
+            camera_height=1080,
+        )
+
+        self.assertEqual(projector.project((960.0, 540.0), 0.0, 0.0, self.distance_m), (0.5, 0.5))
 
     def test_binocular_screen_matches_legacy_when_eye_angles_match(self) -> None:
         estimate = GazeEstimate(
@@ -80,6 +94,26 @@ class ScreenProjectorTest(unittest.TestCase):
 
         self.assertIsNotNone(result.fallback_reason)
         self.assertEqual(result.point, self.projector.project((320.0, 240.0), 0.0, 0.0, self.distance_m))
+
+
+class CameraResolutionArgTest(unittest.TestCase):
+    def test_accepts_presets_and_dimensions(self) -> None:
+        self.assertEqual((camera_resolution_arg("VGA").width, camera_resolution_arg("VGA").height), (640, 480))
+        self.assertEqual(
+            (camera_resolution_arg("Full HD").width, camera_resolution_arg("Full HD").height),
+            (1920, 1080),
+        )
+        self.assertEqual((camera_resolution_arg("1080p").width, camera_resolution_arg("1080p").height), (1920, 1080))
+        self.assertEqual(
+            (camera_resolution_arg("1280x720").width, camera_resolution_arg("1280x720").height),
+            (1280, 720),
+        )
+
+    def test_rejects_duplicate_aliases_and_invalid_values(self) -> None:
+        for value in ("2MP", "not-a-size", "1280x0"):
+            with self.subTest(value=value):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    camera_resolution_arg(value)
 
 
 if __name__ == "__main__":

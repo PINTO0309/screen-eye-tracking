@@ -143,6 +143,7 @@ pnpm dev -- \
 - `--shape-overlay`: On Linux/Windows, restricts the transparent window shape to the visible overlay elements. This is a fallback for environments where normal click-through does not work. Do not use it if the gaze marker flickers.
 - `--display-size-inch`: Target monitor diagonal size in inches. Any positive finite value is accepted. Default: `31.5`.
 - `--camera`: Python runtime uses an OpenCV camera index or video path. Web runtimes use a browser video input index or `deviceId`. Default: `0`.
+- `--camera-resolution`: Camera capture resolution preset or `WIDTHxHEIGHT`. Default: `VGA` (`640x480`). Accepted presets are `QQVGA`, `QVGA`, `VGA`, `SVGA`, `XGA`, `HD`/`720p`, `SXGA`, `UXGA`, `Full HD`/`1080p`, `3MP`, `QHD`/`WQHD`/`1440p`, `5MP`, `6MP`, `4K UHD`, `DCI 4K`, `12MP`, `5K`, `6K`, `8K UHD`, and `12K`. `2MP`, `4MP`, and `8MP` aliases are rejected; use `1920x1080`, `2560x1440`, or `3840x2160` instead.
 - `--camera-fov`: Horizontal camera FOV in degrees. Must be greater than `0` and less than `180`. Default: `90`.
 - `--score-threshold`: Head/Eye detection score threshold.
 - `--calibration-file`: Path for the 5-point calibration result. Default: `.gaze_calibration.json`.
@@ -213,7 +214,7 @@ If the marker sticks to a screen edge after calibration when your face moves up 
 
 ## Estimation Assumptions
 
-- Camera input is treated as `640x480`. Horizontal FOV defaults to `90°` and can be changed with `--camera-fov`.
+- Camera input defaults to `VGA` (`640x480`) and can be changed with `--camera-resolution`. Horizontal FOV defaults to `90°` and can be changed with `--camera-fov`.
 - The camera is assumed to be mounted at the top center of the target display.
 - For the vertical direction, the app estimates eye height relative to the camera center from the face/eye bbox Y position and projects it to screen coordinates assuming the camera is at the top center of the display. If the face moves upward in the camera frame, the marker moves upward; if the face moves downward, the marker moves downward.
 - Adult average Head width is assumed to be `16cm`. The eye-to-display distance is estimated from the detected face/head bbox width.

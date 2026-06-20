@@ -2,8 +2,6 @@ import type { BackendMessage, WebInferenceConfig } from "../global";
 import { logStatus } from "../logger";
 import {
   Calibration,
-  CAMERA_HEIGHT,
-  CAMERA_WIDTH,
   DisplayGeometry,
   ScreenProjector,
   clamp01,
@@ -76,6 +74,9 @@ export async function startWebRuntime(
       detector_providers: models.detectorProviders,
       head_face_width_ratio: config.retinafaceHeadFaceRatio,
       camera_fov_deg: config.cameraFov,
+      camera_resolution_name: config.cameraResolutionName,
+      camera_width: config.cameraWidth,
+      camera_height: config.cameraHeight,
       camera_screen_x: config.cameraScreenX,
       camera_screen_y: config.cameraScreenY,
       eye_position_weight_x: config.eyePositionWeightX,
@@ -84,12 +85,12 @@ export async function startWebRuntime(
       gaze_providers: models.gazeProviders
     });
 
-    const camera = await openCamera(config.camera);
+    const camera = await openCamera(config.camera, config.cameraWidth, config.cameraHeight);
     stream = camera.stream;
     const video = camera.video;
     const canvas = document.createElement("canvas");
-    canvas.width = CAMERA_WIDTH;
-    canvas.height = CAMERA_HEIGHT;
+    canvas.width = config.cameraWidth;
+    canvas.height = config.cameraHeight;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) {
       throw new Error("2D canvas context is not available");
@@ -103,7 +104,9 @@ export async function startWebRuntime(
       config.cameraScreenY,
       config.eyePositionWeightX,
       config.eyePositionWeightY,
-      config.cameraFov
+      config.cameraFov,
+      config.cameraWidth,
+      config.cameraHeight
     );
     const previewInterval = 1000 / Math.max(0.5, config.previewFps);
 
@@ -112,8 +115,8 @@ export async function startWebRuntime(
         return;
       }
       try {
-        ctx.drawImage(video, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
-        const frame = ctx.getImageData(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+        ctx.drawImage(video, 0, 0, config.cameraWidth, config.cameraHeight);
+        const frame = ctx.getImageData(0, 0, config.cameraWidth, config.cameraHeight);
         const { head, eyes } = await models.detect(frame);
         const now = performance.now();
         const shouldEmitPreview = !config.hidePreview && now - lastPreview >= previewInterval;
@@ -203,6 +206,9 @@ export async function startWebRuntime(
               detector_providers: models.detectorProviders,
               head_face_width_ratio: config.retinafaceHeadFaceRatio,
               camera_fov_deg: config.cameraFov,
+              camera_resolution_name: config.cameraResolutionName,
+              camera_width: config.cameraWidth,
+              camera_height: config.cameraHeight,
               camera_screen_x: config.cameraScreenX,
               camera_screen_y: config.cameraScreenY,
               eye_position_weight_x: config.eyePositionWeightX,
@@ -306,13 +312,17 @@ async function captureCalibration(
   }
 }
 
-async function openCamera(camera: string): Promise<{ stream: MediaStream; video: HTMLVideoElement }> {
+async function openCamera(
+  camera: string,
+  expectedWidth: number,
+  expectedHeight: number
+): Promise<{ stream: MediaStream; video: HTMLVideoElement }> {
   const constraints = await cameraConstraints(camera);
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       ...constraints,
-      width: { ideal: CAMERA_WIDTH },
-      height: { ideal: CAMERA_HEIGHT }
+      width: { exact: expectedWidth },
+      height: { exact: expectedHeight }
     },
     audio: false
   });
@@ -323,6 +333,15 @@ async function openCamera(camera: string): Promise<{ stream: MediaStream; video:
   video.srcObject = stream;
   await video.play();
   await waitForVideo(video);
+  const settings = stream.getVideoTracks()[0]?.getSettings();
+  const actualWidth = settings?.width ?? video.videoWidth;
+  const actualHeight = settings?.height ?? video.videoHeight;
+  if (actualWidth !== expectedWidth || actualHeight !== expectedHeight) {
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    throw new Error(`Camera returned ${actualWidth}x${actualHeight}, expected ${expectedWidth}x${expectedHeight}`);
+  }
   return { stream, video };
 }
 

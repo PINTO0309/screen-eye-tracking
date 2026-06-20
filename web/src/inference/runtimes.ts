@@ -60,7 +60,7 @@ async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: 
       const input = new ort.Tensor("float32", createRetinaFaceInput(frame), [1, 3, 480, 640]);
       const results = await detector.run({ [detectorInputName]: input });
       const output = results[detectorOutputName] ?? results[detector.outputNames[0]];
-      return parseRetinaFaceOutput(output.data as Float32Array, config.scoreThreshold);
+      return parseRetinaFaceOutput(output.data as Float32Array, config.scoreThreshold, config.cameraWidth, config.cameraHeight);
     },
     async estimate(frame, head, eyes) {
       const crop = createGazeInput(frame, head, eyes);
@@ -141,7 +141,14 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
         const confLogits = await liteRtTensorData(outputs[detectorOutputs.confLogits]);
         const landms = await liteRtTensorData(outputs[detectorOutputs.landms]);
         try {
-          return parseRetinaFaceRawOutput(loc.data, confLogits.data, landms.data, config.scoreThreshold);
+          return parseRetinaFaceRawOutput(
+            loc.data,
+            confLogits.data,
+            landms.data,
+            config.scoreThreshold,
+            config.cameraWidth,
+            config.cameraHeight
+          );
         } finally {
           loc.delete();
           confLogits.delete();
