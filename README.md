@@ -8,7 +8,7 @@ The application is built as an Electron + React transparent overlay. It can run 
 
   https://github.com/user-attachments/assets/7eff8143-2417-4459-8e63-de97868e3ff0
 
-- Webcam and GPU only
+- Webcam and dGPU/iGPU only
 
   <img width="843" height="458" alt="image" src="https://github.com/user-attachments/assets/c3e192f0-9cb2-4ab8-ae31-9c93ce0647eb" />
 
