@@ -86,7 +86,7 @@ pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-screen
 pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-convergence
 ```
 
-To explicitly use CUDA or CPU:
+To explicitly use TensorRT or CPU:
 
 ```bash
 pnpm dev -- --backend tensorrt --calibrate
