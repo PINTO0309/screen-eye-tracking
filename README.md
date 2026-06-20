@@ -48,10 +48,8 @@ public/models/gaze_Nx3x160x160.onnx
 
 CoreML model archives are also available from the same release:
 
-```text
-https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_retinaface.tar.gz
-https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_gaze.tar.gz
-```
+- [coreml_retinaface.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_retinaface.tar.gz)
+- [coreml_gaze.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_gaze.tar.gz)
 
 For `--runtime onnxweb`, also place:
 
