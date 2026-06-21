@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { startExternalApiServer } = require("./externalApi.cjs");
+const { GazeStateStore } = require("./externalStore.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
 const defaultCalibrationFile = path.join(repoRoot, ".gaze_calibration.json");
@@ -14,7 +16,20 @@ let rendererConfig = null;
 let rendererReady = false;
 let debugOverlay = false;
 let shapeOverlay = false;
+let externalApi = null;
 const pendingMessages = [];
+const gazeStateStore = new GazeStateStore({
+  readCalibrationFile: (filePath) => {
+    try {
+      return fs.readFileSync(filePath, "utf8");
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+});
 
 function appendGpuSwitches() {
   app.commandLine.appendSwitch("ignore-gpu-blocklist");
@@ -62,6 +77,11 @@ function readNumberOption(args, name, fallback) {
 function readPositiveNumberOption(args, name, fallback) {
   const value = readNumberOption(args, name, fallback);
   return value > 0 ? value : fallback;
+}
+
+function readPortOption(args, name, fallback) {
+  const value = Number.parseInt(readOption(args, name, String(fallback)), 10);
+  return value > 0 && value <= 65535 ? value : fallback;
 }
 
 function readCameraFovOption(args) {
@@ -300,7 +320,47 @@ function webInferenceConfig(args, displayBounds, runtime) {
   };
 }
 
+function externalStoreInitOptions(args) {
+  const cameraResolution = readCameraResolutionOption(args);
+  return {
+    backend: readOption(args, "--backend", "tensorrt"),
+    detector: readOption(args, "--detector", "retinaface"),
+    camera: readOption(args, "--camera", "0"),
+    cameraResolutionName: cameraResolution.name,
+    cameraWidth: cameraResolution.width,
+    cameraHeight: cameraResolution.height,
+    cameraFov: readCameraFovOption(args),
+    displaySizeInch: readPositiveNumberOption(args, "--display-size-inch", 31.5),
+    calibrationFile: resolveRepoPath(readOption(args, "--calibration-file", defaultCalibrationFile)),
+    eyePositionWeightX: readNumberOption(args, "--eye-position-weight-x", 1),
+    eyePositionWeightY: readNumberOption(args, "--eye-position-weight-y", 0.25)
+  };
+}
+
+function maybeStartExternalApi(args) {
+  if (!hasFlag(args, "--external-api")) {
+    return;
+  }
+  const host = readOption(args, "--external-api-host", "127.0.0.1");
+  const port = readPortOption(args, "--external-api-port", 47892);
+  externalApi = startExternalApiServer({
+    store: gazeStateStore,
+    host,
+    port,
+    logger: console
+  });
+}
+
+function stopExternalApi() {
+  if (!externalApi) {
+    return;
+  }
+  externalApi.close();
+  externalApi = null;
+}
+
 function sendToRenderer(payload) {
+  gazeStateStore.updateFromBackendMessage(payload);
   if (payload && payload.type === "status" && (payload.level === "warning" || payload.level === "error")) {
     const log = payload.level === "error" ? console.error : console.warn;
     log(`[renderer-status:${payload.level}] ${payload.message}`);
@@ -375,6 +435,8 @@ function createWindow() {
     cameraScreenY: Number.isFinite(cameraScreenY) ? Math.min(1, Math.max(0, cameraScreenY)) : 0,
     webInference: runtime === "python" ? null : webInferenceConfig(args, bounds, runtime)
   };
+  gazeStateStore.initialize(rendererConfig, externalStoreInitOptions(args));
+  maybeStartExternalApi(args);
 
   mainWindow = new BrowserWindow({
     x: bounds.x,
@@ -549,10 +611,15 @@ ipcMain.handle("write-calibration", async (_event, filePath, payload) => {
   const resolved = resolveRepoPath(filePath || defaultCalibrationFile);
   try {
     await fs.promises.writeFile(resolved, JSON.stringify(payload, null, 2), "utf8");
+    gazeStateStore.updateFromBackendMessage({ type: "calibration", status: "saved", path: resolved });
     return { ok: true, path: resolved };
   } catch (error) {
     return { ok: false, error: error.message };
   }
+});
+
+ipcMain.on("publish-backend-message", (_event, payload) => {
+  gazeStateStore.updateFromBackendMessage(payload);
 });
 
 ipcMain.on("renderer-ready", () => {
@@ -590,6 +657,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  stopExternalApi();
   if (backendProcess) {
     backendProcess.kill();
     backendProcess = null;
@@ -598,6 +666,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  stopExternalApi();
   if (backendProcess) {
     backendProcess.kill();
     backendProcess = null;

@@ -18,7 +18,8 @@
     "onnxruntime-web": "1.26.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "vite": "8.0.16"
+    "vite": "8.0.16",
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@types/node": "25.9.3",

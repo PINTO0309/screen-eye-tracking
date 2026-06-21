@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("gazeBridge", {
   writeCalibration: (path, payload) => ipcRenderer.invoke("write-calibration", path, payload),
   ready: () => ipcRenderer.send("renderer-ready"),
   setOverlayRegions: (regions) => ipcRenderer.send("overlay-regions", regions),
+  publishBackendMessage: (payload) => ipcRenderer.send("publish-backend-message", payload),
   onBackendMessage: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("backend-message", listener);

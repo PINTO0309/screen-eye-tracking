@@ -133,6 +133,14 @@ function App() {
     }
   }, []);
 
+  const handleRendererRuntimeMessage = useCallback(
+    (payload: BackendMessage) => {
+      window.gazeBridge.publishBackendMessage(payload);
+      handleBackendMessage(payload);
+    },
+    [handleBackendMessage]
+  );
+
   useEffect(() => {
     window.gazeBridge.getConfig().then(setConfig);
     const unsubscribe = window.gazeBridge.onBackendMessage(handleBackendMessage);
@@ -146,7 +154,7 @@ function App() {
     }
     let cancelled = false;
     webRuntimeStartingRef.current = true;
-    startWebRuntime(config.webInference, handleBackendMessage)
+    startWebRuntime(config.webInference, handleRendererRuntimeMessage)
       .then((runtime) => {
         webRuntimeStartingRef.current = false;
         if (cancelled) {
@@ -158,7 +166,7 @@ function App() {
       .catch((error) => {
         webRuntimeStartingRef.current = false;
         console.error("Failed to start web runtime", error);
-        handleBackendMessage({
+        handleRendererRuntimeMessage({
           type: "status",
           level: "error",
           message: error instanceof Error ? error.message : String(error),
@@ -171,7 +179,7 @@ function App() {
       webRuntimeRef.current?.stop();
       webRuntimeRef.current = null;
     };
-  }, [config?.webInference, handleBackendMessage]);
+  }, [config?.webInference, handleRendererRuntimeMessage]);
 
   useEffect(() => {
     if (!config?.calibrate || calibrationDone) {
@@ -214,7 +222,7 @@ function App() {
       } else {
         webRuntimeRef.current?.captureCalibration(calibrationPoints[calibrationIndex]).catch((error) => {
           console.error("Calibration capture failed", error);
-          handleBackendMessage({
+          handleRendererRuntimeMessage({
             type: "status",
             level: "error",
             message: error instanceof Error ? error.message : String(error),
@@ -236,7 +244,7 @@ function App() {
       window.clearTimeout(captureTimer);
       window.clearTimeout(nextTimer);
     };
-  }, [calibrationIndex, config?.runtime, handleBackendMessage]);
+  }, [calibrationIndex, config?.runtime, handleRendererRuntimeMessage]);
 
   const dotStyle = useMemo(() => {
     if (!gaze || Date.now() - gaze.receivedAt > 1500) {

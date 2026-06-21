@@ -29,6 +29,9 @@ importers:
       vite:
         specifier: 8.0.16
         version: 8.0.16(@types/node@25.9.3)
+      ws:
+        specifier: 8.21.0
+        version: 8.21.0
     devDependencies:
       '@types/node':
         specifier: 25.9.3
@@ -632,6 +635,18 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
 snapshots:
 
   '@electron-internal/extract-zip@1.0.3': {}
@@ -1089,3 +1104,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  ws@8.21.0: {}

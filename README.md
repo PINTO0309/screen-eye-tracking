@@ -82,7 +82,9 @@ An archive of CoreML models is also available from the same release, but I don't
 - [coreml_gaze.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_gaze.tar.gz)
 
 ## Run
+
 ### 1. Python ver
+
 The default ONNX Runtime backend is TensorRT. If TensorRT is unavailable, the backend emits a warning and falls back to CUDA, then CPU.
 
 ```bash
@@ -103,6 +105,7 @@ pnpm dev -- --backend cpu --calibrate
 ```
 
 ### 2. Web component only ver (Python independent)
+
 To run inference fully in Electron without starting Python:
 
 ```bash
@@ -155,6 +158,9 @@ pnpm dev -- \
 - `--smoothing-alpha`: Horizontal gaze marker smoothing. Larger values are steadier but slower. Default: `0.65`.
 - `--smoothing-alpha-y`: Vertical gaze marker smoothing. Larger values are steadier but slower. Default: `0.45`.
 - `--preview-fps`: PiP camera preview update FPS. Default: `8`.
+- `--external-api`: Starts a read-only local HTTP/WebSocket API for external applications. Disabled by default.
+- `--external-api-host`: Host for `--external-api`. Default: `127.0.0.1`.
+- `--external-api-port`: Port for `--external-api`. Default: `47892`.
 - `--hide-preview`: Hides the PiP camera preview.
 - `--no-flip-x`: Disables horizontal gaze point flip correction. By default the screen x coordinate is flipped.
 - `--no-flip-y`: Disables vertical pitch flip correction for the gaze model output. The parallel translation correction from the face/eye camera-space Y position is not flipped.
@@ -168,6 +174,388 @@ pnpm dev -- \
 If vertical tracking feels too slow while horizontal tracking is acceptable, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`.
 
 The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green and Eye detections are drawn in yellow. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
+
+## External Read-Only API
+
+External API access is disabled unless `--external-api` is passed. When enabled, the Electron main process exposes the latest internal state for local applications:
+
+```bash
+pnpm dev -- --backend cuda --external-api
+```
+
+HTTP endpoints:
+
+```text
+GET http://127.0.0.1:47892/health
+GET http://127.0.0.1:47892/snapshot
+GET http://127.0.0.1:47892/snapshot/gaze
+GET http://127.0.0.1:47892/snapshot/display
+GET http://127.0.0.1:47892/snapshot/camera
+GET http://127.0.0.1:47892/snapshot/calibration
+GET http://127.0.0.1:47892/snapshot/runtime
+GET http://127.0.0.1:47892/snapshot/models
+GET http://127.0.0.1:47892/snapshot/status
+```
+
+`gaze` sample.
+
+```json
+{
+  "x_norm": 0.00046604398934387703,
+  "y_norm": 0.958942713790909,
+  "raw_x_norm": 0,
+  "raw_y_norm": 0.27114625325864034,
+  "x_px": 2561.1930726127202,
+  "y_px": 1380.877507858909,
+  "confidence": 0.9944654703140259,
+  "distance_m": 0.4017150043171776,
+  "head_face_width_ratio": 1.545,
+  "eye_position_weight_x": 1,
+  "eye_position_weight_y": 0.25,
+  "gaze_projection_mode": "binocular-screen",
+  "yaw_deg": 45.64941204243133,
+  "pitch_deg": -12.357516307166726,
+  "updated_at": "2026-06-21T13:47:46.399Z"
+}
+```
+
+WebSocket updates are available at:
+
+```text
+ws://127.0.0.1:47892/events
+```
+
+Testing how to retrieve all status information in real time using WebSocket.
+
+```bash
+websocat ws://127.0.0.1:47892/events | jq .
+```
+
+Result sample.
+
+```json
+{
+  "type": "update",
+  "changed": [
+    "preview"
+  ],
+  "snapshot": {
+    "schema_version": 1,
+    "started_at": "2026-06-21T13:47:11.321Z",
+    "updated_at": "2026-06-21T13:49:54.535Z",
+    "runtime": {
+      "name": "onnxweb",
+      "backend": "tensorrt",
+      "updated_at": "2026-06-21T13:47:13.297Z",
+      "accelerator": "webgpu"
+    },
+    "display": {
+      "display_index": 1,
+      "requested_display_index": 1,
+      "display_count": 2,
+      "bounds": {
+        "x": 2560,
+        "y": 0,
+        "width": 2560,
+        "height": 1440
+      },
+      "invalid_display": false,
+      "display_size_inch": 31.5,
+      "display_width": 2560,
+      "display_height": 1440,
+      "updated_at": "2026-06-21T13:47:11.515Z"
+    },
+    "camera": {
+      "camera": "0",
+      "camera_resolution_name": "VGA",
+      "camera_width": 640,
+      "camera_height": 480,
+      "camera_fov_deg": 90,
+      "camera_screen_x": 0.5,
+      "camera_screen_y": 0,
+      "eye_position_weight_x": 1,
+      "eye_position_weight_y": 0.25,
+      "updated_at": "2026-06-21T13:47:13.297Z"
+    },
+    "gaze": {
+      "x_norm": 0.17188336409460786,
+      "y_norm": 0.5195849356182066,
+      "raw_x_norm": 0.40830238024351473,
+      "raw_y_norm": 0.06745025281012713,
+      "x_px": 3000.021412082196,
+      "y_px": 748.2023072902175,
+      "confidence": 0.9993162155151367,
+      "distance_m": 0.35452647209083504,
+      "head_face_width_ratio": 1.545,
+      "eye_position_weight_x": 1,
+      "eye_position_weight_y": 0.25,
+      "gaze_projection_mode": "binocular-screen",
+      "yaw_deg": -0.5973023779724806,
+      "pitch_deg": -3.642409505603852,
+      "updated_at": "2026-06-21T13:49:54.453Z"
+    },
+    "calibration": {
+      "path": "/home/b920405/git/screen-eye-tracking/.gaze_calibration.json",
+      "affine": [
+        [
+          4.7702737155679955,
+          -0.16037419549669352
+        ],
+        [
+          -0.1617891579496593,
+          8.48930676701609
+        ],
+        [
+          -1.7831292403376189,
+          0.03883337028363698
+        ]
+      ],
+      "source_bounds": {
+        "min": [
+          0.3911222626423193,
+          0.01679723168253273
+        ],
+        "max": [
+          0.5708666378962844,
+          0.1091656248711355
+        ],
+        "margin": 0.08
+      },
+      "samples": [
+        {
+          "raw": [
+            0.47425021214696883,
+            0.06281074167161842
+          ],
+          "target": [
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "raw": [
+            0.3911222626423193,
+            0.01679723168253273
+          ],
+          "target": [
+            0.12,
+            0.12
+          ]
+        },
+        {
+          "raw": [
+            0.5708666378962844,
+            0.02074244710003301
+          ],
+          "target": [
+            0.88,
+            0.12
+          ]
+        },
+        {
+          "raw": [
+            0.5491286581713097,
+            0.1091656248711355
+          ],
+          "target": [
+            0.88,
+            0.88
+          ]
+        },
+        {
+          "raw": [
+            0.4184644907591354,
+            0.10751170352506421
+          ],
+          "target": [
+            0.12,
+            0.88
+          ]
+        }
+      ],
+      "updated_at": "2026-06-21T13:47:24.147Z",
+      "status": "saved",
+      "saved_path": "/home/b920405/git/screen-eye-tracking/.gaze_calibration.json"
+    },
+    "models": {
+      "detector": {
+        "runtime": "onnxweb",
+        "accelerator": "webgpu",
+        "detector": "retinaface",
+        "model": "/home/b920405/git/screen-eye-tracking/public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
+        "providers": [
+          "webgpu"
+        ],
+        "updated_at": "2026-06-21T13:47:13.297Z"
+      },
+      "gaze": {
+        "runtime": "onnxweb",
+        "accelerator": "webgpu",
+        "providers": [
+          "webgpu"
+        ],
+        "updated_at": "2026-06-21T13:47:13.297Z"
+      }
+    },
+    "status": {
+      "level": "info",
+      "message": "Models loaded",
+      "updated_at": "2026-06-21T13:47:13.297Z"
+    },
+    "preview": {
+      "head_detected": true,
+      "eye_count": 2,
+      "width_ratio": 1.545,
+      "updated_at": "2026-06-21T13:49:54.535Z"
+    }
+  }
+}
+```
+
+
+The WebSocket sends a `snapshot` event on connect and `update` events after state changes. The snapshot uses `schema_version: 1` and includes latest-known `runtime`, `display`, `camera`, `gaze`, `calibration`, `models`, `status`, and preview metadata. Preview image data is intentionally omitted from the external snapshot.
+
+Snapshot fields are latest-known values. Slices can be `null` before the app has enough data, and fields that are not known yet are omitted from JSON responses.
+
+```ts
+type ExternalSnapshot = {
+  schema_version: 1;
+  started_at: string; // ISO timestamp
+  updated_at: string; // ISO timestamp
+  runtime: RuntimeState | null;
+  display: DisplayState | null;
+  camera: CameraState | null;
+  gaze: GazeState | null;
+  calibration: CalibrationState | null;
+  models: {
+    detector: ModelState | null;
+    gaze: ModelState | null;
+  };
+  status: StatusState | null;
+  preview: PreviewState | null;
+};
+
+type RuntimeState = {
+  name?: "python" | "onnxweb" | "litert";
+  backend?: "tensorrt" | "cuda" | "cpu" | string;
+  accelerator?: "tensorrt" | "cuda" | "cpu" | "webgpu" | "wasm" | string;
+  updated_at: string;
+};
+
+type DisplayState = {
+  display_index?: number;
+  requested_display_index?: number;
+  display_count?: number;
+  bounds?: { x?: number; y?: number; width?: number; height?: number };
+  invalid_display: boolean;
+  display_size_inch?: number;
+  display_width?: number;
+  display_height?: number;
+  updated_at: string;
+};
+
+type CameraState = {
+  camera?: string;
+  camera_resolution_name?: string;
+  camera_width?: number;
+  camera_height?: number;
+  camera_fov_deg?: number;
+  camera_screen_x?: number;
+  camera_screen_y?: number;
+  eye_position_weight_x?: number;
+  eye_position_weight_y?: number;
+  updated_at: string;
+};
+
+type GazeState = {
+  x_norm?: number;
+  y_norm?: number;
+  raw_x_norm?: number;
+  raw_y_norm?: number;
+  x_px?: number;
+  y_px?: number;
+  confidence?: number;
+  distance_m?: number;
+  head_face_width_ratio?: number;
+  eye_position_weight_x?: number;
+  eye_position_weight_y?: number;
+  gaze_projection_mode?:
+    | "legacy"
+    | "binocular-screen"
+    | "binocular-convergence";
+  yaw_deg?: number;
+  pitch_deg?: number;
+  updated_at: string;
+};
+
+type CalibrationState = {
+  path?: string;
+  status?: string;
+  count?: number;
+  saved_path?: string;
+  message?: string;
+  affine?: number[][];
+  source_bounds?: {
+    min?: [number, number];
+    max?: [number, number];
+    margin?: number;
+  };
+  samples?: Array<{
+    raw: [number, number];
+    target: [number, number];
+  }>;
+  read_error?: string;
+  updated_at: string;
+};
+
+type ModelState = {
+  runtime?: "python" | "onnxweb" | "litert";
+  accelerator?: "tensorrt" | "cuda" | "cpu" | "webgpu" | "wasm" | string;
+  detector?: "retinaface" | "deim" | string;
+  model?: string;
+  providers?: string[];
+  updated_at: string;
+};
+
+type StatusState = {
+  level?: "info" | "warning" | "error";
+  message?: string;
+  updated_at: string;
+};
+
+type PreviewState = {
+  head_detected: boolean;
+  eye_count?: number;
+  width_ratio?: number;
+  updated_at: string;
+};
+```
+
+`x_norm` and `y_norm` are normalized gaze-marker coordinates on the selected display. `x_px` and `y_px` are desktop pixel coordinates computed from the selected display bounds, so multi-monitor offsets are included. `raw_x_norm` and `raw_y_norm` are the projection result before calibration correction and smoothing. The `preview` slice is available in the full `/snapshot` response and WebSocket events, but there is no `/snapshot/preview` endpoint.
+
+WebSocket message shapes:
+
+```ts
+type SnapshotEvent = {
+  type: "snapshot";
+  snapshot: ExternalSnapshot;
+};
+
+type UpdateEvent = {
+  type: "update";
+  changed: Array<
+    | "runtime"
+    | "display"
+    | "camera"
+    | "gaze"
+    | "calibration"
+    | "models"
+    | "status"
+    | "preview"
+  >;
+  snapshot: ExternalSnapshot;
+};
+```
 
 When RetinaFace is used, distance estimation still needs the `16cm` Head-width assumption used by DEIMv2 Head detection. RetinaFace Face width is narrower than Head width, so the static source constant `RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545` converts Face width to Head-equivalent width before distance estimation. The current ratio is shown in the lower-right status area and the PiP preview.
 

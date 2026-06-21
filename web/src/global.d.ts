@@ -11,6 +11,7 @@ declare global {
       ) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
       ready: () => void;
       setOverlayRegions: (regions: OverlayRegion[]) => void;
+      publishBackendMessage: (payload: BackendMessage) => void;
       onBackendMessage: (callback: (payload: BackendMessage) => void) => () => void;
       sendCalibrationCapture: (target: [number, number]) => void;
     };
