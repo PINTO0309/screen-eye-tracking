@@ -22,10 +22,8 @@ MediaPipe dependency-free.
 
 ## Setup
 
-Python is pinned to the 3.10.x series. This repository uses `.python-version` set to `3.10.12`.
-
 ```bash
-########## This step is not necessary if you are not using Python
+########## This step is not necessary if you are not using Python ##########
 # Installing uv
 ## Linux / Mac
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -36,7 +34,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 uv python install 3.10.12
 uv sync
 source .venv/bin/activate
-########## This step is not necessary if you are not using Python
+########## This step is not necessary if you are not using Python ##########
 
 # Installing pnpm
 ## Linux / Mac
