@@ -81,7 +81,7 @@ public/models/deimv2_dinov3_x_wholebody49_ins_s08_maskhead256x3_center_1240query
 ```
 
 ## Run
-### Python ver
+### 1. Python ver
 The default ONNX Runtime backend is TensorRT. If TensorRT is unavailable, the backend emits a warning and falls back to CUDA, then CPU.
 
 ```bash
@@ -101,7 +101,7 @@ pnpm dev -- --backend tensorrt --calibrate
 pnpm dev -- --backend cpu --calibrate
 ```
 
-### Web component only ver (Python independent)
+### 2. Web component only ver (Python independent)
 To run inference fully in Electron without starting Python:
 
 ```bash
