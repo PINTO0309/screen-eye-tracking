@@ -54,11 +54,6 @@ public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
 public/models/gaze_Nx3x160x160.onnx
 ```
 
-CoreML model archives are also available from the same release:
-
-- [coreml_retinaface.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_retinaface.tar.gz)
-- [coreml_gaze.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_gaze.tar.gz)
-
 For `--runtime onnxweb`, also place:
 
 ```text
@@ -79,6 +74,11 @@ If you use DEIMv2 as the detector, also place this model under `public/models/`.
 ```text
 public/models/deimv2_dinov3_x_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.onnx
 ```
+
+An archive of CoreML models is also available from the same release, but I don't have demo code because I don't own an iPhone.
+
+- [coreml_retinaface.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_retinaface.tar.gz)
+- [coreml_gaze.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_gaze.tar.gz)
 
 ## Run
 ### 1. Python ver
