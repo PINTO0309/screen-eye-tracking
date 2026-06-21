@@ -6,6 +6,8 @@ A desktop application that estimates where the user is looking on the selected d
 
 The application is built as an Electron + React transparent overlay. It can run inference through the original Python / ONNX Runtime GPU backend, or fully inside Electron renderer with onnxruntime-web or LiteRT.js.
 
+MediaPipe dependency-free.
+
 - Tested on a 31.5-inch display - The display size can be changed using CLI parameters
 
   https://github.com/user-attachments/assets/7eff8143-2417-4459-8e63-de97868e3ff0
