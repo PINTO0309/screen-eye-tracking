@@ -33,6 +33,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 # Starting a virtual environment
+uv python install 3.10.12
 uv sync
 source .venv/bin/activate
 ########## This step is not necessary if you are not using Python
