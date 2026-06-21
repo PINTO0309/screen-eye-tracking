@@ -180,7 +180,9 @@ The PiP preview in the upper-right corner shows the camera image and detection s
 External API access is disabled unless `--external-api` is passed. When enabled, the Electron main process exposes the latest internal state for local applications:
 
 ```bash
-pnpm dev -- --backend cuda --external-api
+pnpm dev -- --backend cuda --external-api --calibrate --gaze-projection-mode binocular-screen
+pnpm dev -- --runtime onnxweb --external-api --calibrate --gaze-projection-mode binocular-screen
+pnpm dev -- --runtime litert --external-api --calibrate --gaze-projection-mode binocular-screen
 ```
 
 HTTP endpoints:
