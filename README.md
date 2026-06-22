@@ -303,7 +303,7 @@ Result sample.
       "updated_at": "2026-06-21T13:49:54.453Z"
     },
     "calibration": {
-      "path": "/home/b920405/git/screen-eye-tracking/.gaze_calibration.json",
+      "path": "/home/xxxxx/git/screen-eye-tracking/.gaze_calibration.json",
       "affine": [
         [
           4.7702737155679955,
@@ -383,14 +383,14 @@ Result sample.
       ],
       "updated_at": "2026-06-21T13:47:24.147Z",
       "status": "saved",
-      "saved_path": "/home/b920405/git/screen-eye-tracking/.gaze_calibration.json"
+      "saved_path": "/home/xxxxx/git/screen-eye-tracking/.gaze_calibration.json"
     },
     "models": {
       "detector": {
         "runtime": "onnxweb",
         "accelerator": "webgpu",
         "detector": "retinaface",
-        "model": "/home/b920405/git/screen-eye-tracking/public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
+        "model": "/home/xxxxx/git/screen-eye-tracking/public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx",
         "providers": [
           "webgpu"
         ],
