@@ -7,7 +7,8 @@ import {
   parseCameraResolution,
   parseRetinaFaceOutput,
   parseRetinaFacePreNmsOutput,
-  parseRetinaFaceRawOutput
+  parseRetinaFaceRawOutput,
+  parseYoloOutput
 } from "./core";
 import type { GazeEstimate } from "./core";
 
@@ -159,6 +160,84 @@ describe("RetinaFace parser", () => {
     const loc = new Float32Array([Number.NaN, 0, 0, 0]);
     const result = parseRetinaFaceRawOutput(loc, new Float32Array([0, 4]), new Float32Array(10), 0.5);
     expect(result.head).toBeNull();
+  });
+});
+
+describe("YOLO WholeBody28 parser", () => {
+  function yoloOutput(candidateCount: number): Float32Array {
+    return new Float32Array(32 * candidateCount);
+  }
+
+  function setYoloBox(output: Float32Array, candidateCount: number, index: number, cx: number, cy: number, width: number, height: number) {
+    output[index] = cx;
+    output[candidateCount + index] = cy;
+    output[candidateCount * 2 + index] = width;
+    output[candidateCount * 3 + index] = height;
+  }
+
+  function setYoloScore(output: Float32Array, candidateCount: number, index: number, classId: number, score: number) {
+    output[candidateCount * (4 + classId) + index] = score;
+  }
+
+  it("maps class 7 to Head, class 17 to Eye, and scales direct-resize boxes", () => {
+    const output = yoloOutput(3);
+    setYoloBox(output, 3, 0, 320, 240, 200, 220);
+    setYoloScore(output, 3, 0, 7, 0.8);
+    setYoloBox(output, 3, 1, 270, 230, 30, 20);
+    setYoloScore(output, 3, 1, 17, 0.21);
+    setYoloBox(output, 3, 2, 370, 230, 30, 20);
+    setYoloScore(output, 3, 2, 17, 0.22);
+
+    const result = parseYoloOutput(output, 0.75, 1280, 720);
+
+    expect(result.head?.classId).toBe(7);
+    expect(result.head?.score).toBeCloseTo(0.8);
+    expect(result.head?.x1).toBeCloseTo(440);
+    expect(result.head?.y1).toBeCloseTo(195);
+    expect(result.head?.x2).toBeCloseTo(840);
+    expect(result.head?.y2).toBeCloseTo(525);
+    expect(result.eyes).toHaveLength(2);
+    expect(result.eyes[0].classId).toBe(17);
+    expect(result.eyes[0].x1).toBeLessThan(result.eyes[1].x1);
+  });
+
+  it("uses the normal score threshold for Head and fixed 0.20 for Eye", () => {
+    const output = yoloOutput(3);
+    setYoloBox(output, 3, 0, 320, 240, 200, 220);
+    setYoloScore(output, 3, 0, 7, 0.79);
+    setYoloBox(output, 3, 1, 270, 230, 30, 20);
+    setYoloScore(output, 3, 1, 17, 0.19);
+    setYoloBox(output, 3, 2, 370, 230, 30, 20);
+    setYoloScore(output, 3, 2, 17, 0.2);
+
+    const noHead = parseYoloOutput(output, 0.8);
+    const withHead = parseYoloOutput(output, 0.79);
+
+    expect(noHead.head).toBeNull();
+    expect(withHead.head?.score).toBeCloseTo(0.79);
+    expect(withHead.eyes).toHaveLength(1);
+    expect(withHead.eyes[0].score).toBeCloseTo(0.2);
+  });
+
+  it("applies class-specific NMS before selecting the eye pair inside the head", () => {
+    const output = yoloOutput(5);
+    setYoloBox(output, 5, 0, 320, 240, 220, 220);
+    setYoloScore(output, 5, 0, 7, 0.9);
+    setYoloBox(output, 5, 1, 322, 242, 220, 220);
+    setYoloScore(output, 5, 1, 7, 0.85);
+    setYoloBox(output, 5, 2, 260, 230, 30, 20);
+    setYoloScore(output, 5, 2, 17, 0.7);
+    setYoloBox(output, 5, 3, 262, 231, 30, 20);
+    setYoloScore(output, 5, 3, 17, 0.6);
+    setYoloBox(output, 5, 4, 380, 230, 30, 20);
+    setYoloScore(output, 5, 4, 17, 0.65);
+
+    const result = parseYoloOutput(output, 0.5);
+
+    expect(result.head?.score).toBeCloseTo(0.9);
+    expect(result.eyes).toHaveLength(2);
+    expect(result.eyes[0].score).toBeCloseTo(0.7);
+    expect(result.eyes[1].score).toBeCloseTo(0.65);
   });
 });
 

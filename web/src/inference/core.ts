@@ -4,6 +4,11 @@ export const CAMERA_WIDTH = 640;
 export const CAMERA_HEIGHT = 480;
 export const RETINAFACE_INPUT_WIDTH = 640;
 export const RETINAFACE_INPUT_HEIGHT = 480;
+export const YOLO_INPUT_WIDTH = 640;
+export const YOLO_INPUT_HEIGHT = 480;
+export const YOLO_CLASS_COUNT = 28;
+export const YOLO_EYE_SCORE_THRESHOLD = 0.2;
+export const YOLO_NMS_IOU_THRESHOLD = 0.45;
 export const GAZE_INPUT_SIZE = 160;
 export const HEAD_CLASS_ID = 7;
 export const EYE_CLASS_ID = 17;
@@ -170,6 +175,94 @@ export function createRetinaFaceInputNhwc(frame: ImageData): Float32Array {
     }
   }
   return input;
+}
+
+export function createYoloInput(frame: ImageData): Float32Array {
+  const input = new Float32Array(1 * 3 * YOLO_INPUT_HEIGHT * YOLO_INPUT_WIDTH);
+  const plane = YOLO_INPUT_HEIGHT * YOLO_INPUT_WIDTH;
+  const data = frame.data;
+  for (let y = 0; y < YOLO_INPUT_HEIGHT; y += 1) {
+    const srcY = Math.min(frame.height - 1, Math.floor(((y + 0.5) * frame.height) / YOLO_INPUT_HEIGHT));
+    for (let x = 0; x < YOLO_INPUT_WIDTH; x += 1) {
+      const srcX = Math.min(frame.width - 1, Math.floor(((x + 0.5) * frame.width) / YOLO_INPUT_WIDTH));
+      const src = (srcY * frame.width + srcX) * 4;
+      const dst = y * YOLO_INPUT_WIDTH + x;
+      input[dst] = data[src] / 255;
+      input[plane + dst] = data[src + 1] / 255;
+      input[plane * 2 + dst] = data[src + 2] / 255;
+    }
+  }
+  return input;
+}
+
+export function createYoloInputNhwc(frame: ImageData): Float32Array {
+  const input = new Float32Array(1 * YOLO_INPUT_HEIGHT * YOLO_INPUT_WIDTH * 3);
+  const data = frame.data;
+  for (let y = 0; y < YOLO_INPUT_HEIGHT; y += 1) {
+    const srcY = Math.min(frame.height - 1, Math.floor(((y + 0.5) * frame.height) / YOLO_INPUT_HEIGHT));
+    for (let x = 0; x < YOLO_INPUT_WIDTH; x += 1) {
+      const srcX = Math.min(frame.width - 1, Math.floor(((x + 0.5) * frame.width) / YOLO_INPUT_WIDTH));
+      const src = (srcY * frame.width + srcX) * 4;
+      const dst = (y * YOLO_INPUT_WIDTH + x) * 3;
+      input[dst] = data[src] / 255;
+      input[dst + 1] = data[src + 1] / 255;
+      input[dst + 2] = data[src + 2] / 255;
+    }
+  }
+  return input;
+}
+
+export function parseYoloOutput(
+  output: ArrayLike<number>,
+  scoreThreshold: number,
+  targetWidth = CAMERA_WIDTH,
+  targetHeight = CAMERA_HEIGHT
+): {
+  head: Detection | null;
+  eyes: Detection[];
+} {
+  const rowSize = 4 + YOLO_CLASS_COUNT;
+  if (output.length % rowSize !== 0) {
+    throw new Error(`Unexpected YOLO output length ${output.length}`);
+  }
+  const candidateCount = output.length / rowSize;
+  const scaleX = targetWidth / YOLO_INPUT_WIDTH;
+  const scaleY = targetHeight / YOLO_INPUT_HEIGHT;
+  const heads: Detection[] = [];
+  const eyes: Detection[] = [];
+
+  for (let index = 0; index < candidateCount; index += 1) {
+    const cx = Number(output[index]);
+    const cy = Number(output[candidateCount + index]);
+    const boxWidth = Number(output[candidateCount * 2 + index]);
+    const boxHeight = Number(output[candidateCount * 3 + index]);
+    if (![cx, cy, boxWidth, boxHeight].every(Number.isFinite) || boxWidth <= 0 || boxHeight <= 0) {
+      continue;
+    }
+    const x1 = clamp((cx - boxWidth * 0.5) * scaleX, 0, targetWidth - 1);
+    const y1 = clamp((cy - boxHeight * 0.5) * scaleY, 0, targetHeight - 1);
+    const x2 = clamp((cx + boxWidth * 0.5) * scaleX, 0, targetWidth - 1);
+    const y2 = clamp((cy + boxHeight * 0.5) * scaleY, 0, targetHeight - 1);
+    if (x2 <= x1 || y2 <= y1) {
+      continue;
+    }
+
+    const headScore = Number(output[candidateCount * (4 + HEAD_CLASS_ID) + index]);
+    if (Number.isFinite(headScore) && headScore >= scoreThreshold) {
+      heads.push({ classId: HEAD_CLASS_ID, score: headScore, x1, y1, x2, y2 });
+    }
+    const eyeScore = Number(output[candidateCount * (4 + EYE_CLASS_ID) + index]);
+    if (Number.isFinite(eyeScore) && eyeScore >= YOLO_EYE_SCORE_THRESHOLD) {
+      eyes.push({ classId: EYE_CLASS_ID, score: eyeScore, x1, y1, x2, y2 });
+    }
+  }
+
+  const selectedHeads = nmsDetections(heads, YOLO_NMS_IOU_THRESHOLD);
+  if (selectedHeads.length === 0) {
+    return { head: null, eyes: [] };
+  }
+  const head = selectedHeads[0];
+  return { head, eyes: selectEyePair(head, nmsDetections(eyes, YOLO_NMS_IOU_THRESHOLD)) };
 }
 
 export function parseRetinaFaceOutput(
@@ -427,6 +520,58 @@ function isFinitePoint(point: [number, number]): boolean {
 
 function clamp(value: number, low: number, high: number): number {
   return Math.max(low, Math.min(high, value));
+}
+
+function detectionIou(a: Detection, b: Detection): number {
+  const ix1 = Math.max(a.x1, b.x1);
+  const iy1 = Math.max(a.y1, b.y1);
+  const ix2 = Math.min(a.x2, b.x2);
+  const iy2 = Math.min(a.y2, b.y2);
+  const intersection = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+  const union = width(a) * height(a) + width(b) * height(b) - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+function nmsDetections(detections: Detection[], iouThreshold: number): Detection[] {
+  const remaining = [...detections].sort((a, b) => b.score - a.score);
+  const selected: Detection[] = [];
+  while (remaining.length > 0) {
+    const current = remaining.shift() as Detection;
+    selected.push(current);
+    for (let index = remaining.length - 1; index >= 0; index -= 1) {
+      if (detectionIou(current, remaining[index]) > iouThreshold) {
+        remaining.splice(index, 1);
+      }
+    }
+  }
+  return selected;
+}
+
+function selectEyePair(head: Detection, eyes: Detection[]): Detection[] {
+  const marginX = width(head) * 0.2;
+  const marginY = height(head) * 0.2;
+  const candidates = eyes
+    .filter((eye) => {
+      const [cx, cy] = center(eye);
+      return cx >= head.x1 - marginX && cx <= head.x2 + marginX && cy >= head.y1 - marginY && cy <= head.y2 + marginY;
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
+  if (candidates.length <= 2) {
+    return candidates.sort((a, b) => center(a)[0] - center(b)[0]);
+  }
+  let bestPair: [Detection, Detection] = [candidates[0], candidates[1]];
+  let bestScore = -Infinity;
+  for (let i = 0; i < candidates.length; i += 1) {
+    for (let j = i + 1; j < candidates.length; j += 1) {
+      const score = Math.abs(center(candidates[i])[0] - center(candidates[j])[0]) * (candidates[i].score + candidates[j].score);
+      if (score > bestScore) {
+        bestScore = score;
+        bestPair = [candidates[i], candidates[j]];
+      }
+    }
+  }
+  return bestPair.sort((a, b) => center(a)[0] - center(b)[0]);
 }
 
 function eyeDetection(point: [number, number], size: number, score: number): Detection {

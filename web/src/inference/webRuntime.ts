@@ -32,20 +32,8 @@ export async function startWebRuntime(
   const calibration = new Calibration(config.calibrationFile, emit);
   await calibration.load();
 
-  if (config.detector !== "retinaface") {
-    emit({
-      type: "status",
-      level: "error",
-      message: `${config.runtime} runtime supports only RetinaFace detector`,
-      runtime: config.runtime
-    });
-    return {
-      captureCalibration: (target) => captureCalibration(calibration, latestRaw, target, emit, config),
-      stop: () => {
-        stopped = true;
-      }
-    };
-  }
+  const headFaceWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : 1;
+  const previewWidthRatio = config.detector === "retinaface" ? config.retinafaceHeadFaceRatio : null;
 
   try {
     try {
@@ -70,9 +58,9 @@ export async function startWebRuntime(
       runtime: config.runtime,
       accelerator: models.accelerator,
       detector: config.detector,
-      detector_model: config.retinafaceModel,
+      detector_model: config.detectorModel,
       detector_providers: models.detectorProviders,
-      head_face_width_ratio: config.retinafaceHeadFaceRatio,
+      head_face_width_ratio: headFaceWidthRatio,
       camera_fov_deg: config.cameraFov,
       camera_resolution_name: config.cameraResolutionName,
       camera_width: config.cameraWidth,
@@ -126,7 +114,7 @@ export async function startWebRuntime(
         if (head === null || eyes.length < 2) {
           if (shouldEmitPreview) {
             const message = head === null ? "Head not detected" : `Eyes detected: ${eyes.length}`;
-            emitPreview(frame, head, eyes, message, null, config.retinafaceHeadFaceRatio, emit);
+            emitPreview(frame, head, eyes, message, null, previewWidthRatio, emit);
             lastPreview = now;
           }
           throw new Error(head === null ? "Head was not detected" : "Two eyes were not detected");
@@ -137,10 +125,10 @@ export async function startWebRuntime(
         const gazeEnd = performance.now();
         const gazeInferenceMs = gazeEnd - gazeStart;
         if (shouldEmitPreview) {
-          emitPreview(frame, head, eyes, null, [gaze.yawDeg, gaze.pitchDeg], config.retinafaceHeadFaceRatio, emit);
+          emitPreview(frame, head, eyes, null, [gaze.yawDeg, gaze.pitchDeg], previewWidthRatio, emit);
           lastPreview = now;
         }
-        const distanceM = projector.distanceFromHead(head, config.retinafaceHeadFaceRatio);
+        const distanceM = projector.distanceFromHead(head, headFaceWidthRatio);
         const projection = projector.projectEstimate(config.gazeProjectionMode, eyes, gaze, distanceM);
         if (projection.fallbackReason && now - lastProjectionWarning > 2000) {
           const payload: BackendMessage = {
@@ -177,7 +165,7 @@ export async function startWebRuntime(
           raw_y_norm: latestRaw[1],
           confidence,
           distance_m: distanceM,
-          head_face_width_ratio: config.retinafaceHeadFaceRatio,
+          head_face_width_ratio: headFaceWidthRatio,
           eye_position_weight_x: projector.eyePositionWeightX,
           eye_position_weight_y: projector.eyePositionWeightY,
           gaze_projection_mode: config.gazeProjectionMode,
@@ -211,9 +199,9 @@ export async function startWebRuntime(
               runtime: config.runtime,
               accelerator: models.accelerator,
               detector: config.detector,
-              detector_model: config.retinafaceModel,
+              detector_model: config.detectorModel,
               detector_providers: models.detectorProviders,
-              head_face_width_ratio: config.retinafaceHeadFaceRatio,
+              head_face_width_ratio: headFaceWidthRatio,
               camera_fov_deg: config.cameraFov,
               camera_resolution_name: config.cameraResolutionName,
               camera_width: config.cameraWidth,
@@ -394,7 +382,7 @@ function emitPreview(
   eyes: Detection[],
   message: string | null,
   gazeAngles: [number, number] | null,
-  widthRatio: number,
+  widthRatio: number | null,
   emit: (payload: BackendMessage) => void
 ): void {
   const image = createPreviewImage(frame, head, eyes, message, widthRatio, gazeAngles ?? undefined);

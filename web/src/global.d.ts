@@ -50,7 +50,7 @@ export type WebAccelerator = AcceleratorName;
 
 export interface WebInferenceConfig {
   runtime: Exclude<RuntimeName, "python">;
-  detector: "retinaface" | "deim";
+  detector: "retinaface" | "yolo";
   backend: string;
   camera: string;
   cameraResolutionName?: string;
@@ -62,8 +62,11 @@ export interface WebInferenceConfig {
   displayWidth: number;
   displayHeight: number;
   calibrationFile: string;
+  detectorModel: string;
   retinafaceModel: string;
+  yoloModel: string;
   gazeModel: string;
+  detectorModelUrl: string;
   retinafaceModelUrl: string;
   gazeModelUrl: string;
   onnxWasmBaseUrl: string;
@@ -128,7 +131,7 @@ export type BackendMessage =
       image: string;
       head_detected: boolean;
       eye_count: number;
-      width_ratio?: number;
+      width_ratio?: number | null;
     }
   | {
       type: "calibration";

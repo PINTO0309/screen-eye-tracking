@@ -19,8 +19,8 @@ import onnxruntime as ort
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DEIM_MODEL = REPO_ROOT / "public" / "models" / "deimv2_dinov3_x_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.onnx"
 DEFAULT_RETINAFACE_MODEL = REPO_ROOT / "public" / "models" / "retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx"
+DEFAULT_YOLO_MODEL = REPO_ROOT / "public" / "models" / "yolomit_n_wholebody28_1x3x480x640.onnx"
 DEFAULT_GAZE_MODEL = REPO_ROOT / "public" / "models" / "gaze_Nx3x160x160.onnx"
 DEFAULT_CALIBRATION_FILE = REPO_ROOT / ".gaze_calibration.json"
 
@@ -32,6 +32,11 @@ CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 CAMERA_HORIZONTAL_FOV_DEG = 90.0
 GAZE_INPUT_SIZE = 160
+YOLO_INPUT_WIDTH = 640
+YOLO_INPUT_HEIGHT = 480
+YOLO_CLASS_COUNT = 28
+YOLO_EYE_SCORE_THRESHOLD = 0.20
+YOLO_NMS_IOU_THRESHOLD = 0.45
 IRIS_IDX_481 = np.asarray([248, 252, 224, 228, 232, 236, 240, 244], dtype=np.int64)
 
 
@@ -205,6 +210,91 @@ def draw_gaze_lines(image: np.ndarray, eyes: list[Detection], yaw_deg: float, pi
         cv2.circle(image, start, 3, (0, 255, 0), -1, cv2.LINE_AA)
 
 
+def detection_iou(a: Detection, b: Detection) -> float:
+    ix1 = max(a.x1, b.x1)
+    iy1 = max(a.y1, b.y1)
+    ix2 = min(a.x2, b.x2)
+    iy2 = min(a.y2, b.y2)
+    intersection = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    union = a.width * a.height + b.width * b.height - intersection
+    return intersection / union if union > 0.0 else 0.0
+
+
+def nms_detections(detections: Iterable[Detection], iou_threshold: float) -> list[Detection]:
+    remaining = sorted(detections, key=lambda det: det.score, reverse=True)
+    selected: list[Detection] = []
+    while remaining:
+        current = remaining.pop(0)
+        selected.append(current)
+        remaining = [det for det in remaining if detection_iou(current, det) <= iou_threshold]
+    return selected
+
+
+def select_eye_pair(head: Detection, eyes: Iterable[Detection]) -> list[Detection]:
+    margin_x = head.width * 0.20
+    margin_y = head.height * 0.20
+    candidates = []
+    for eye in eyes:
+        cx, cy = eye.center
+        if head.x1 - margin_x <= cx <= head.x2 + margin_x and head.y1 - margin_y <= cy <= head.y2 + margin_y:
+            candidates.append(eye)
+    candidates.sort(key=lambda det: det.score, reverse=True)
+    candidates = candidates[:6]
+    if len(candidates) <= 2:
+        return sorted(candidates, key=lambda det: det.center[0])
+    best_pair = max(
+        ((a, b) for idx, a in enumerate(candidates) for b in candidates[idx + 1 :]),
+        key=lambda pair: abs(pair[0].center[0] - pair[1].center[0]) * (pair[0].score + pair[1].score),
+    )
+    return sorted(best_pair, key=lambda det: det.center[0])
+
+
+def parse_yolo_output(
+    output: np.ndarray,
+    score_threshold: float,
+    image_w: int = CAMERA_WIDTH,
+    image_h: int = CAMERA_HEIGHT,
+    input_w: int = YOLO_INPUT_WIDTH,
+    input_h: int = YOLO_INPUT_HEIGHT,
+) -> tuple[Detection | None, list[Detection]]:
+    values = np.asarray(output, dtype=np.float32)
+    if values.ndim == 3 and values.shape[0] == 1:
+        values = values[0]
+    if values.ndim != 2 or values.shape[0] != 4 + YOLO_CLASS_COUNT:
+        raise ValueError(f"Unexpected YOLO output shape: {tuple(values.shape)}")
+
+    scale_x = float(image_w) / float(input_w)
+    scale_y = float(image_h) / float(input_h)
+    heads: list[Detection] = []
+    eyes: list[Detection] = []
+    for index in range(values.shape[1]):
+        cx = float(values[0, index])
+        cy = float(values[1, index])
+        box_w = float(values[2, index])
+        box_h = float(values[3, index])
+        if not all(math.isfinite(v) for v in (cx, cy, box_w, box_h)) or box_w <= 0.0 or box_h <= 0.0:
+            continue
+        x1 = max(0.0, min(float(image_w - 1), (cx - box_w * 0.5) * scale_x))
+        y1 = max(0.0, min(float(image_h - 1), (cy - box_h * 0.5) * scale_y))
+        x2 = max(0.0, min(float(image_w - 1), (cx + box_w * 0.5) * scale_x))
+        y2 = max(0.0, min(float(image_h - 1), (cy + box_h * 0.5) * scale_y))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        head_score = float(values[4 + HEAD_CLASS_ID, index])
+        if math.isfinite(head_score) and head_score >= score_threshold:
+            heads.append(Detection(HEAD_CLASS_ID, head_score, x1, y1, x2, y2))
+        eye_score = float(values[4 + EYE_CLASS_ID, index])
+        if math.isfinite(eye_score) and eye_score >= YOLO_EYE_SCORE_THRESHOLD:
+            eyes.append(Detection(EYE_CLASS_ID, eye_score, x1, y1, x2, y2))
+
+    heads = nms_detections(heads, YOLO_NMS_IOU_THRESHOLD)
+    eyes = nms_detections(eyes, YOLO_NMS_IOU_THRESHOLD)
+    if not heads:
+        return None, []
+    head = heads[0]
+    return head, select_eye_pair(head, eyes)
+
+
 def emit_preview(
     frame: np.ndarray,
     head: Detection | None,
@@ -289,81 +379,30 @@ def transform_points3d(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return transformed
 
 
-class DeimV2EyeDetector:
+class YoloWholebodyDetector:
     def __init__(self, model_path: Path, backend: str, score_threshold: float) -> None:
         self.model_path = model_path
         self.score_threshold = score_threshold
         providers = build_providers(backend, model_path)
         self.session = ort.InferenceSession(str(model_path), sess_options=session_options(), providers=providers)
         self.input = self.session.get_inputs()[0]
-        self.output_names = [output.name for output in self.session.get_outputs()]
+        self.output = self.session.get_outputs()[0]
         self.providers = self.session.get_providers()
         self._validate_model()
 
     def _validate_model(self) -> None:
-        if self.input.name != "images" or list(self.input.shape) != [1, 3, 640, 640]:
-            raise RuntimeError(f"Unexpected DEIMv2 input: {self.input.name} {self.input.shape}")
-        if "label_xyxy_score" not in self.output_names:
-            raise RuntimeError(f"DEIMv2 output label_xyxy_score is required, got {self.output_names}")
+        if self.input.name != "images" or list(self.input.shape) != [1, 3, YOLO_INPUT_HEIGHT, YOLO_INPUT_WIDTH]:
+            raise RuntimeError(f"Unexpected YOLO input: {self.input.name} {self.input.shape}")
+        if self.output.name != "output0" or list(self.output.shape) != [1, 4 + YOLO_CLASS_COUNT, 6300]:
+            raise RuntimeError(f"Unexpected YOLO output: {self.output.name} {self.output.shape}")
 
     def detect(self, frame: np.ndarray) -> tuple[Detection | None, list[Detection]]:
         image_h, image_w = frame.shape[:2]
-        resized = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
+        resized = cv2.resize(frame, (YOLO_INPUT_WIDTH, YOLO_INPUT_HEIGHT), interpolation=cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        mean = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
-        chw = ((rgb - mean) / std).transpose(2, 0, 1)[None, ...].astype(np.float32)
-        output = self.session.run(["label_xyxy_score"], {"images": chw})[0][0]
-
-        detections: list[Detection] = []
-        for row in output:
-            class_id = int(row[0])
-            if class_id not in {HEAD_CLASS_ID, EYE_CLASS_ID}:
-                continue
-            score = float(row[5])
-            if score < self.score_threshold:
-                continue
-            x1, y1, x2, y2 = [float(v) for v in row[1:5]]
-            if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 2.0:
-                x1, x2 = x1 * image_w, x2 * image_w
-                y1, y2 = y1 * image_h, y2 * image_h
-            else:
-                x1, x2 = x1 * image_w / 640.0, x2 * image_w / 640.0
-                y1, y2 = y1 * image_h / 640.0, y2 * image_h / 640.0
-            x1 = max(0.0, min(float(image_w - 1), x1))
-            x2 = max(0.0, min(float(image_w - 1), x2))
-            y1 = max(0.0, min(float(image_h - 1), y1))
-            y2 = max(0.0, min(float(image_h - 1), y2))
-            if x2 <= x1 or y2 <= y1:
-                continue
-            detections.append(Detection(class_id, score, x1, y1, x2, y2))
-
-        heads = sorted((det for det in detections if det.class_id == HEAD_CLASS_ID), key=lambda det: det.score, reverse=True)
-        eyes = [det for det in detections if det.class_id == EYE_CLASS_ID]
-        if not heads:
-            return None, []
-        head = heads[0]
-        selected = self._select_eyes(head, eyes)
-        return head, selected
-
-    @staticmethod
-    def _select_eyes(head: Detection, eyes: Iterable[Detection]) -> list[Detection]:
-        margin_x = head.width * 0.20
-        margin_y = head.height * 0.20
-        candidates = []
-        for eye in eyes:
-            cx, cy = eye.center
-            if head.x1 - margin_x <= cx <= head.x2 + margin_x and head.y1 - margin_y <= cy <= head.y2 + margin_y:
-                candidates.append(eye)
-        candidates.sort(key=lambda det: det.score, reverse=True)
-        candidates = candidates[:6]
-        if len(candidates) <= 2:
-            return sorted(candidates, key=lambda det: det.center[0])
-        best_pair = max(
-            ((a, b) for idx, a in enumerate(candidates) for b in candidates[idx + 1 :]),
-            key=lambda pair: abs(pair[0].center[0] - pair[1].center[0]) * (pair[0].score + pair[1].score),
-        )
-        return sorted(best_pair, key=lambda det: det.center[0])
+        input_tensor = rgb.transpose(2, 0, 1)[None, ...].astype(np.float32)
+        output = self.session.run([self.output.name], {self.input.name: input_tensor})[0]
+        return parse_yolo_output(output, self.score_threshold, image_w, image_h)
 
 
 class RetinaFaceEyeDetector:
@@ -765,7 +804,7 @@ def camera_resolution_arg(value: str) -> CameraResolution:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--detector", choices=["retinaface", "deim"], default="retinaface")
+    parser.add_argument("--detector", choices=["retinaface", "yolo"], default="retinaface")
     parser.add_argument("--backend", choices=["tensorrt", "cuda", "cpu"], default="tensorrt")
     parser.add_argument("--camera", default="0")
     parser.add_argument("--camera-resolution", type=camera_resolution_arg, default=DEFAULT_CAMERA_RESOLUTION)
@@ -777,7 +816,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-file", type=Path, default=DEFAULT_CALIBRATION_FILE)
     parser.add_argument("--detector-model", type=Path, default=None)
     parser.add_argument("--retinaface-model", type=Path, default=DEFAULT_RETINAFACE_MODEL)
-    parser.add_argument("--deim-model", type=Path, default=DEFAULT_DEIM_MODEL)
+    parser.add_argument("--yolo-model", type=Path, default=DEFAULT_YOLO_MODEL)
     parser.add_argument("--gaze-model", type=Path, default=DEFAULT_GAZE_MODEL)
     parser.add_argument("--smoothing-alpha", type=float, default=0.65)
     parser.add_argument("--smoothing-alpha-y", type=float, default=0.45)
@@ -839,11 +878,11 @@ def main() -> None:
 
     detector_model = args.detector_model
     if detector_model is None:
-        detector_model = args.retinaface_model if args.detector == "retinaface" else args.deim_model
+        detector_model = args.retinaface_model if args.detector == "retinaface" else args.yolo_model
     if args.detector == "retinaface":
         detector = RetinaFaceEyeDetector(detector_model, args.backend, args.score_threshold)
     else:
-        detector = DeimV2EyeDetector(detector_model, args.backend, args.score_threshold)
+        detector = YoloWholebodyDetector(detector_model, args.backend, args.score_threshold)
     head_face_width_ratio = args.retinaface_head_face_ratio if args.detector == "retinaface" else 1.0
     gaze = GazeEstimator(args.gaze_model, args.backend)
     projector = ScreenProjector(

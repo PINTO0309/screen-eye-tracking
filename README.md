@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20771714.svg)](https://doi.org/10.5281/zenodo.20771713)
 
-A desktop application that estimates where the user is looking on the selected display and renders a red gaze marker at the estimated hit position. It uses RetinaFace or DEIMv2 Wholebody49 for eye position detection and an ONNX gaze model for gaze estimation.
+A desktop application that estimates where the user is looking on the selected display and renders a red gaze marker at the estimated hit position. It uses RetinaFace or YOLO WholeBody28 for eye position detection and an ONNX gaze model for gaze estimation.
 
 The application is built as an Electron + React transparent overlay. It can run inference through the original Python / ONNX Runtime GPU backend, or fully inside Electron renderer with onnxruntime-web or LiteRT.js.
 
@@ -46,18 +46,20 @@ Invoke-WebRequest https://get.pnpm.io/install.ps1 -UseBasicParsing | Invoke-Expr
 pnpm install
 ```
 
-Download the model files from the [`onnx` release](https://github.com/PINTO0309/screen-eye-tracking/releases/tag/onnx), then place the required models under `public/models/`.
+Download the model files from the [release](https://github.com/PINTO0309/screen-eye-tracking/releases/tag/onnx), then place the required models under `public/models/`.
 
 For `--runtime python`:
 
 ```text
 public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
+public/models/yolomit_n_wholebody28_1x3x480x640.onnx
 public/models/gaze_Nx3x160x160.onnx
 ```
 
 For `--runtime onnxweb`, also place:
 
 ```text
+public/models/yolomit_n_wholebody28_1x3x480x640.onnx
 public/models/gaze_1x3x160x160.onnx
 ```
 
@@ -65,16 +67,11 @@ For `--runtime litert`, also place:
 
 ```text
 public/models/retinaface_mbn025_wo_postprocess_480x640_float32.tflite
+public/models/yolomit_n_wholebody28_1x3x480x640_float32.tflite
 public/models/gaze_1x3x160x160_float32.tflite
 ```
 
 The LiteRT RetinaFace model has its dynamic postprocess tail removed. It must output `loc`, `conf_logits`, and `landms`; the renderer decodes boxes, scores, landmarks, and applies the lightweight selection step in JavaScript.
-
-If you use DEIMv2 as the detector, also place this model under `public/models/`.
-
-```text
-public/models/deimv2_dinov3_x_wholebody49_ins_s08_maskhead256x3_center_1240query_masks.onnx
-```
 
 An archive of CoreML models is also available from the same release, but I don't have demo code because I don't own an iPhone.
 
@@ -146,9 +143,9 @@ pnpm dev -- \
 
 - `--runtime python|onnxweb|litert`: Inference runtime. Default: `python`. `onnxweb` and `litert` never start the Python process.
 - `--backend tensorrt|cuda|cpu`: Python ONNX Runtime execution backend. Default: `tensorrt`. Ignored by web runtimes.
-- `--detector retinaface|deim`: Eye position detector. Default: `retinaface`.
+- `--detector retinaface|yolo`: Eye position detector. Default: `retinaface`.
 - `--retinaface-model`: RetinaFace model path. Default: `public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx`.
-- `--deim-model`: DEIMv2 model path. Used when `--detector deim` is selected.
+- `--yolo-model`: YOLO WholeBody28 model path. Defaults to `public/models/yolomit_n_wholebody28_1x3x480x640.onnx` for Python/onnxweb and `public/models/yolomit_n_wholebody28_1x3x480x640_float32.tflite` for LiteRT.
 - `--detector-model`: Directly overrides the selected detector model path.
 - `--display-index`: Target monitor index for the overlay marker. This uses the display order reported by Electron.
 - `--debug-overlay`: Starts as a normal opaque window instead of a transparent overlay and opens DevTools.
@@ -157,7 +154,7 @@ pnpm dev -- \
 - `--camera`: Python runtime uses an OpenCV camera index or video path. Web runtimes use a browser video input index or `deviceId`. Default: `0`.
 - `--camera-resolution`: Camera capture resolution preset or `WIDTHxHEIGHT`. Default: `VGA` (`640x480`). Accepted presets are `QQVGA`, `QVGA`, `VGA`, `SVGA`, `XGA`, `HD`/`720p`, `SXGA`, `UXGA`, `Full HD`/`1080p`, `3MP`, `QHD`/`WQHD`/`1440p`, `5MP`, `6MP`, `4K UHD`, `DCI 4K`, `12MP`, `5K`, `6K`, `8K UHD`, and `12K`. `2MP`, `4MP`, and `8MP` aliases are rejected; use `1920x1080`, `2560x1440`, or `3840x2160` instead.
 - `--camera-fov`: Horizontal camera FOV in degrees. Must be greater than `0` and less than `180`. Default: `90`.
-- `--score-threshold`: Head/Eye detection score threshold.
+- `--score-threshold`: Detection score threshold. For YOLO, this applies to Head; Eye uses a fixed `0.20` threshold.
 - `--calibration-file`: Path for the 5-point calibration result. Default: `.gaze_calibration.json`.
 - `--calibrate`: Runs 5-point calibration.
 - `--smoothing-alpha`: Horizontal gaze marker smoothing. Larger values are steadier but slower. Default: `0.65`.
@@ -527,7 +524,7 @@ type CalibrationState = {
 type ModelState = {
   runtime?: "python" | "onnxweb" | "litert";
   accelerator?: "tensorrt" | "cuda" | "cpu" | "webgpu" | "wasm" | string;
-  detector?: "retinaface" | "deim" | string;
+  detector?: "retinaface" | "yolo" | string;
   model?: string;
   providers?: string[];
   updated_at: string;
@@ -573,7 +570,7 @@ type UpdateEvent = {
 };
 ```
 
-When RetinaFace is used, distance estimation still needs the `16cm` Head-width assumption used by DEIMv2 Head detection. RetinaFace Face width is narrower than Head width, so the static source constant `RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545` converts Face width to Head-equivalent width before distance estimation. The current ratio is shown in the lower-right status area and the PiP preview.
+When RetinaFace is used, distance estimation still needs the `16cm` Head-width assumption. RetinaFace Face width is narrower than Head width, so the static source constant `RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545` converts Face width to Head-equivalent width before distance estimation. The current ratio is shown in the lower-right status area and the PiP preview.
 
 Experimental binocular projection modes can be selected with `--gaze-projection-mode`. `legacy` keeps the original behavior, averaging the left/right eye gaze angles before projection. `binocular-screen` projects each eye separately to the screen plane and averages the two hit points. `binocular-convergence` estimates the closest point between the left/right gaze rays and uses that point as the screen hit position; if the rays are unstable, it falls back to `legacy`.
 
@@ -583,14 +580,6 @@ These binocular modes are approximations from the model's per-eye yaw/pitch and 
 pnpm dev -- --gaze-projection-mode binocular-screen --calibration-file .gaze_calibration.binocular-screen.json
 pnpm dev -- --gaze-projection-mode binocular-convergence --calibration-file .gaze_calibration.binocular-convergence.json
 ```
-
-To use DEIMv2 Eye detection:
-
-```bash
-pnpm dev -- --backend cuda --detector deim
-```
-
-DEIMv2 is supported only by `--runtime python`. The web runtimes currently support RetinaFace only.
 
 ## If Nothing Appears
 
@@ -629,7 +618,7 @@ If the marker sticks to a screen edge after calibration when your face moves up 
 - With RetinaFace, Face width is converted to Head-equivalent width using the static Head/Face ratio `1.545`.
 - By default, RetinaFace left/right eye landmarks are used to compute the gaze-model crop center.
 - `--gaze-projection-mode binocular-screen` and `binocular-convergence` use left/right gaze angles separately; they are experimental approximations and should be calibrated separately from `legacy`.
-- With `--detector deim`, the top two DEIMv2 class id `17` Eye detections are used.
+- With `--detector yolo`, WholeBody28 class id `7` is Head and class id `17` is Eye; Eye detections use a fixed score threshold of `0.20`.
 
 ## Known Limitations
 

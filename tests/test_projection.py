@@ -2,7 +2,9 @@ import argparse
 import math
 import unittest
 
-from screen_eye_tracking.backend import Detection, DisplayGeometry, GazeEstimate, ScreenProjector, camera_resolution_arg
+import numpy as np
+
+from screen_eye_tracking.backend import Detection, DisplayGeometry, GazeEstimate, ScreenProjector, camera_resolution_arg, parse_yolo_output
 
 
 class ScreenProjectorTest(unittest.TestCase):
@@ -114,6 +116,82 @@ class CameraResolutionArgTest(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(argparse.ArgumentTypeError):
                     camera_resolution_arg(value)
+
+
+class YoloWholeBody28ParserTest(unittest.TestCase):
+    @staticmethod
+    def output(candidate_count: int) -> np.ndarray:
+        return np.zeros((1, 32, candidate_count), dtype=np.float32)
+
+    @staticmethod
+    def set_box(output: np.ndarray, index: int, cx: float, cy: float, width: float, height: float) -> None:
+        output[0, 0, index] = cx
+        output[0, 1, index] = cy
+        output[0, 2, index] = width
+        output[0, 3, index] = height
+
+    @staticmethod
+    def set_score(output: np.ndarray, index: int, class_id: int, score: float) -> None:
+        output[0, 4 + class_id, index] = score
+
+    def test_maps_classes_and_scales_direct_resize_boxes(self) -> None:
+        output = self.output(3)
+        self.set_box(output, 0, 320.0, 240.0, 200.0, 220.0)
+        self.set_score(output, 0, 7, 0.8)
+        self.set_box(output, 1, 270.0, 230.0, 30.0, 20.0)
+        self.set_score(output, 1, 17, 0.21)
+        self.set_box(output, 2, 370.0, 230.0, 30.0, 20.0)
+        self.set_score(output, 2, 17, 0.22)
+
+        head, eyes = parse_yolo_output(output, 0.75, image_w=1280, image_h=720)
+
+        self.assertIsNotNone(head)
+        assert head is not None
+        self.assertEqual(head.class_id, 7)
+        self.assertAlmostEqual(head.x1, 440.0)
+        self.assertAlmostEqual(head.y1, 195.0)
+        self.assertAlmostEqual(head.x2, 840.0)
+        self.assertAlmostEqual(head.y2, 525.0)
+        self.assertEqual([eye.class_id for eye in eyes], [17, 17])
+        self.assertLess(eyes[0].x1, eyes[1].x1)
+
+    def test_head_uses_score_threshold_and_eye_uses_fixed_threshold(self) -> None:
+        output = self.output(3)
+        self.set_box(output, 0, 320.0, 240.0, 200.0, 220.0)
+        self.set_score(output, 0, 7, 0.79)
+        self.set_box(output, 1, 270.0, 230.0, 30.0, 20.0)
+        self.set_score(output, 1, 17, 0.19)
+        self.set_box(output, 2, 370.0, 230.0, 30.0, 20.0)
+        self.set_score(output, 2, 17, 0.20)
+
+        no_head, no_eyes = parse_yolo_output(output, 0.8)
+        head, eyes = parse_yolo_output(output, 0.79)
+
+        self.assertIsNone(no_head)
+        self.assertEqual(no_eyes, [])
+        self.assertIsNotNone(head)
+        self.assertEqual(len(eyes), 1)
+        self.assertAlmostEqual(eyes[0].score, 0.20, places=6)
+
+    def test_applies_class_specific_nms(self) -> None:
+        output = self.output(5)
+        self.set_box(output, 0, 320.0, 240.0, 220.0, 220.0)
+        self.set_score(output, 0, 7, 0.9)
+        self.set_box(output, 1, 322.0, 242.0, 220.0, 220.0)
+        self.set_score(output, 1, 7, 0.85)
+        self.set_box(output, 2, 260.0, 230.0, 30.0, 20.0)
+        self.set_score(output, 2, 17, 0.7)
+        self.set_box(output, 3, 262.0, 231.0, 30.0, 20.0)
+        self.set_score(output, 3, 17, 0.6)
+        self.set_box(output, 4, 380.0, 230.0, 30.0, 20.0)
+        self.set_score(output, 4, 17, 0.65)
+
+        head, eyes = parse_yolo_output(output, 0.5)
+
+        self.assertIsNotNone(head)
+        assert head is not None
+        self.assertAlmostEqual(head.score, 0.9)
+        self.assertEqual([round(eye.score, 2) for eye in eyes], [0.7, 0.65])
 
 
 if __name__ == "__main__":

@@ -229,7 +229,7 @@ function backendArgs(args, displayBounds) {
     "--calibration-file",
     "--detector-model",
     "--retinaface-model",
-    "--deim-model",
+    "--yolo-model",
     "--gaze-model",
     "--smoothing-alpha",
     "--smoothing-alpha-y",
@@ -268,16 +268,23 @@ function webInferenceConfig(args, displayBounds, runtime) {
   const retinafaceModel = resolveRepoPath(
     readOption(
       args,
-      "--detector-model",
-      readOption(
-        args,
-        "--retinaface-model",
-        runtime === "litert"
-          ? "public/models/retinaface_mbn025_wo_postprocess_480x640_float32.tflite"
-          : "public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx"
-      )
+      "--retinaface-model",
+      runtime === "litert"
+        ? "public/models/retinaface_mbn025_wo_postprocess_480x640_float32.tflite"
+        : "public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx"
     )
   );
+  const yoloModel = resolveRepoPath(
+    readOption(
+      args,
+      "--yolo-model",
+      runtime === "litert"
+        ? "public/models/yolomit_n_wholebody28_1x3x480x640_float32.tflite"
+        : "public/models/yolomit_n_wholebody28_1x3x480x640.onnx"
+    )
+  );
+  const defaultDetectorModel = detector === "yolo" ? yoloModel : retinafaceModel;
+  const detectorModel = resolveRepoPath(readOption(args, "--detector-model", defaultDetectorModel));
   const gazeModel = resolveRepoPath(
     readOption(
       args,
@@ -299,8 +306,11 @@ function webInferenceConfig(args, displayBounds, runtime) {
     displayWidth: displayBounds.width,
     displayHeight: displayBounds.height,
     calibrationFile,
+    detectorModel,
     retinafaceModel,
+    yoloModel,
     gazeModel,
+    detectorModelUrl: copyModelForRenderer(detectorModel),
     retinafaceModelUrl: copyModelForRenderer(retinafaceModel),
     gazeModelUrl: copyModelForRenderer(gazeModel),
     onnxWasmBaseUrl: copyOnnxRuntimeAssetsForRenderer(),

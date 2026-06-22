@@ -4,12 +4,17 @@ import {
   createGazeInputNhwc,
   createRetinaFaceInput,
   createRetinaFaceInputNhwc,
+  createYoloInput,
+  createYoloInputNhwc,
   estimateGazeFromModelOutput,
   type Detection,
   type GazeEstimate,
   type GazeCrop,
   parseRetinaFaceOutput,
-  parseRetinaFaceRawOutput
+  parseRetinaFaceRawOutput,
+  parseYoloOutput,
+  YOLO_INPUT_HEIGHT,
+  YOLO_INPUT_WIDTH
 } from "./core";
 
 export interface RuntimeModels {
@@ -37,7 +42,7 @@ async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: 
   ort.env.wasm.wasmPaths = absoluteAssetUrl(config.onnxWasmBaseUrl);
   ort.env.logLevel = "error";
   const providers = [accelerator];
-  const detector = await createOnnxSessionQueued(ort, config.retinafaceModelUrl, providers);
+  const detector = await createOnnxSessionQueued(ort, config.detectorModelUrl, providers);
   let gaze: Awaited<ReturnType<typeof ort.InferenceSession.create>>;
   try {
     if (accelerator === "webgpu") {
@@ -48,8 +53,8 @@ async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: 
     void detector.release();
     throw error;
   }
-  const detectorInputName = "input";
-  const detectorOutputName = "batchno_classid_score_x1y1x2y2_landms";
+  const detectorInputName = config.detector === "yolo" ? detector.inputNames[0] ?? "images" : "input";
+  const detectorOutputName = config.detector === "yolo" ? detector.outputNames[0] ?? "output0" : "batchno_classid_score_x1y1x2y2_landms";
   const gazeInputName = "input";
   const gazeOutputName = "output";
   return {
@@ -57,9 +62,15 @@ async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: 
     detectorProviders: providers,
     gazeProviders: providers,
     async detect(frame) {
-      const input = new ort.Tensor("float32", createRetinaFaceInput(frame), [1, 3, 480, 640]);
+      const input =
+        config.detector === "yolo"
+          ? new ort.Tensor("float32", createYoloInput(frame), [1, 3, YOLO_INPUT_HEIGHT, YOLO_INPUT_WIDTH])
+          : new ort.Tensor("float32", createRetinaFaceInput(frame), [1, 3, 480, 640]);
       const results = await detector.run({ [detectorInputName]: input });
       const output = results[detectorOutputName] ?? results[detector.outputNames[0]];
+      if (config.detector === "yolo") {
+        return parseYoloOutput(output.data as Float32Array, config.scoreThreshold, config.cameraWidth, config.cameraHeight);
+      }
       return parseRetinaFaceOutput(output.data as Float32Array, config.scoreThreshold, config.cameraWidth, config.cameraHeight);
     },
     async estimate(frame, head, eyes) {
@@ -102,7 +113,7 @@ function absoluteAssetUrl(url: string): string {
 async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAccelerator): Promise<RuntimeModels> {
   const { Tensor, loadAndCompile, loadLiteRt } = await import("@litertjs/core");
   await ensureLiteRtLoaded(loadLiteRt, absoluteAssetUrl(config.liteRtWasmBaseUrl));
-  const detector = await loadAndCompile(config.retinafaceModelUrl, { accelerator });
+  const detector = await loadAndCompile(config.detectorModelUrl, { accelerator });
   let gaze: Awaited<ReturnType<typeof loadAndCompile>>;
   try {
     gaze = await loadAndCompile(config.gazeModelUrl, { accelerator });
@@ -111,16 +122,26 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
     throw error;
   }
   const detectorInputShape = Array.from(detector.getInputDetails()[0].shape);
-  const detectorOutputs = {
-    loc: liteRtOutputIndex(detector.getOutputDetails(), "loc", [1, 12600, 4]),
-    confLogits: liteRtOutputIndex(detector.getOutputDetails(), "conf_logits", [1, 12600, 2]),
-    landms: liteRtOutputIndex(detector.getOutputDetails(), "landms", [1, 12600, 10])
-  };
+  const yoloOutputIndex = config.detector === "yolo" ? yoloLiteRtOutputIndex(detector.getOutputDetails()) : -1;
+  const retinaFaceOutputs =
+    config.detector === "retinaface"
+      ? {
+          loc: liteRtOutputIndex(detector.getOutputDetails(), "loc", [1, 12600, 4]),
+          confLogits: liteRtOutputIndex(detector.getOutputDetails(), "conf_logits", [1, 12600, 2]),
+          landms: liteRtOutputIndex(detector.getOutputDetails(), "landms", [1, 12600, 10])
+        }
+      : null;
   const gazeInputShape = Array.from(gaze.getInputDetails()[0].shape);
-  validateLiteRtInputShape("RetinaFace", detectorInputShape, [
-    [1, 3, 480, 640],
-    [1, 480, 640, 3]
-  ]);
+  validateLiteRtInputShape(
+    config.detector === "yolo" ? "YOLO" : "RetinaFace",
+    detectorInputShape,
+    config.detector === "yolo"
+      ? [[1, YOLO_INPUT_HEIGHT, YOLO_INPUT_WIDTH, 3]]
+      : [
+          [1, 3, 480, 640],
+          [1, 480, 640, 3]
+        ]
+  );
   validateLiteRtInputShape("Gaze", gazeInputShape, [
     [1, 3, 160, 160],
     [1, 160, 160, 3]
@@ -130,16 +151,30 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
     detectorProviders: [detector.isFullyAccelerated ? accelerator : "wasm"],
     gazeProviders: [gaze.isFullyAccelerated ? accelerator : "wasm"],
     async detect(frame) {
-      const inputData = isShape(detectorInputShape, [1, 480, 640, 3])
-        ? createRetinaFaceInputNhwc(frame)
-        : createRetinaFaceInput(frame);
+      const inputData =
+        config.detector === "yolo"
+          ? createYoloInputNhwc(frame)
+          : isShape(detectorInputShape, [1, 480, 640, 3])
+            ? createRetinaFaceInputNhwc(frame)
+            : createRetinaFaceInput(frame);
       const input = new Tensor(inputData, detectorInputShape);
       const outputs = (await detector.run(input)) as InstanceType<typeof Tensor>[];
       input.delete();
       try {
-        const loc = await liteRtTensorData(outputs[detectorOutputs.loc]);
-        const confLogits = await liteRtTensorData(outputs[detectorOutputs.confLogits]);
-        const landms = await liteRtTensorData(outputs[detectorOutputs.landms]);
+        if (config.detector === "yolo") {
+          const output0 = await liteRtTensorData(outputs[yoloOutputIndex]);
+          try {
+            return parseYoloOutput(output0.data, config.scoreThreshold, config.cameraWidth, config.cameraHeight);
+          } finally {
+            output0.delete();
+          }
+        }
+        if (retinaFaceOutputs === null) {
+          throw new Error(`Unsupported LiteRT detector: ${config.detector}`);
+        }
+        const loc = await liteRtTensorData(outputs[retinaFaceOutputs.loc]);
+        const confLogits = await liteRtTensorData(outputs[retinaFaceOutputs.confLogits]);
+        const landms = await liteRtTensorData(outputs[retinaFaceOutputs.landms]);
         try {
           return parseRetinaFaceRawOutput(
             loc.data,
@@ -206,6 +241,20 @@ function liteRtOutputIndex(
         expectedShape
       )}`
     );
+  }
+  return detail.index;
+}
+
+function yoloLiteRtOutputIndex(outputs: readonly { readonly name: string; readonly index: number; readonly shape: Int32Array }[]): number {
+  const detail =
+    outputs.find((output) => output.name === "output0") ??
+    outputs.find((output) => isShape(Array.from(output.shape), [1, 4 + 28, 6300]));
+  if (!detail) {
+    throw new Error("YOLO LiteRT output0 was not found");
+  }
+  const shape = Array.from(detail.shape);
+  if (!isShape(shape, [1, 4 + 28, 6300])) {
+    throw new Error(`YOLO LiteRT output0 shape ${JSON.stringify(shape)} is not supported; expected [1,32,6300]`);
   }
   return detail.index;
 }
