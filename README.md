@@ -123,12 +123,9 @@ pnpm dev -- --runtime litert --calibrate --gaze-projection-mode binocular-screen
 The web runtimes try WebGPU first. If model loading fails, they reload both models with wasm.
 When a web runtime is selected, Electron uses the selected model files in `public/models/` during dev runs and copies them to `dist/models/` for production runs. It also copies the required runtime wasm assets from `node_modules/` to `public/` during dev runs, or to `dist/` for production runs. The renderer loads both models and wasm assets as normal public assets.
 
-To build and run:
+## Lip Motion
 
-```bash
-pnpm build
-pnpm start -- --backend tensorrt --calibrate
-```
+<img width="600" alt="LipMotion" src="https://github.com/user-attachments/assets/9f256287-cf8e-4b1b-9770-3b3c04373911" />
 
 ## Main Options
 
