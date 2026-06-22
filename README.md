@@ -135,6 +135,8 @@ pnpm dev -- --runtime litert --detector yolo --enable-lip-motion --calibrate --g
 
 <img width="600" alt="LipMotion" src="https://github.com/user-attachments/assets/9f256287-cf8e-4b1b-9770-3b3c04373911" />
 
+https://github.com/user-attachments/assets/0d761f22-047a-4f5a-b83a-6200f11897eb
+
 ## Main Options
 
 ```bash
