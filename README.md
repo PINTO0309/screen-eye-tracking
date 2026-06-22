@@ -125,6 +125,14 @@ When a web runtime is selected, Electron uses the selected model files in `publi
 
 ## Lip Motion
 
+If you specify `yolo` for `--detector` and also specify `--enable-lip-motion`, you can try out a feature that emulates a left mouse click action by opening and closing your mouth. Your gaze moves frequently and unconsciously, so clicking in the exact right position will require miraculous skill.
+
+```bash
+pnpm dev -- --backend cuda --detector yolo --calibrate --gaze-projection-mode binocular-screen --display-size-inch 31.5
+pnpm dev -- --runtime onnxweb --detector yolo --enable-lip-motion --calibrate --gaze-projection-mode binocular-screen --display-size-inch 31.5
+pnpm dev -- --runtime litert --detector yolo --enable-lip-motion --calibrate --gaze-projection-mode binocular-screen --display-size-inch 31.5
+```
+
 <img width="600" alt="LipMotion" src="https://github.com/user-attachments/assets/9f256287-cf8e-4b1b-9770-3b3c04373911" />
 
 ## Main Options
