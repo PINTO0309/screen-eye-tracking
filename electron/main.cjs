@@ -2,8 +2,10 @@ const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { mouse, Button, Point } = require("@nut-tree-fork/nut-js");
 const { startExternalApiServer } = require("./externalApi.cjs");
 const { GazeStateStore } = require("./externalStore.cjs");
+const { createLipClickController } = require("./lipClickController.cjs");
 
 const repoRoot = path.resolve(__dirname, "..");
 const defaultCalibrationFile = path.join(repoRoot, ".gaze_calibration.json");
@@ -17,6 +19,7 @@ let rendererReady = false;
 let debugOverlay = false;
 let shapeOverlay = false;
 let externalApi = null;
+let lipClickController = null;
 const pendingMessages = [];
 const gazeStateStore = new GazeStateStore({
   readCalibrationFile: (filePath) => {
@@ -231,6 +234,7 @@ function backendArgs(args, displayBounds) {
     "--retinaface-model",
     "--yolo-model",
     "--gaze-model",
+    "--lip-motion-model",
     "--smoothing-alpha",
     "--smoothing-alpha-y",
     "--preview-fps",
@@ -249,6 +253,9 @@ function backendArgs(args, displayBounds) {
   }
   if (hasFlag(args, "--hide-preview")) {
     passthrough.push("--hide-preview");
+  }
+  if (hasFlag(args, "--enable-lip-motion")) {
+    passthrough.push("--enable-lip-motion");
   }
   if (hasFlag(args, "--no-flip-x")) {
     passthrough.push("--no-flip-x");
@@ -279,8 +286,8 @@ function webInferenceConfig(args, displayBounds, runtime) {
       args,
       "--yolo-model",
       runtime === "litert"
-        ? "public/models/yolomit_n_wholebody28_1x3x480x640_float32.tflite"
-        : "public/models/yolomit_n_wholebody28_1x3x480x640.onnx"
+        ? "public/models/yolomit_t_wholebody28_1x3x480x640_float32.tflite"
+        : "public/models/yolomit_t_wholebody28_1x3x480x640.onnx"
     )
   );
   const defaultDetectorModel = detector === "yolo" ? yoloModel : retinafaceModel;
@@ -292,6 +299,14 @@ function webInferenceConfig(args, displayBounds, runtime) {
       runtime === "litert" ? "public/models/gaze_1x3x160x160_float32.tflite" : "public/models/gaze_1x3x160x160.onnx"
     )
   );
+  const lipMotionModel = resolveRepoPath(
+    readOption(
+      args,
+      "--lip-motion-model",
+      runtime === "litert" ? "public/models/vsdlm_l_float32.tflite" : "public/models/vsdlm_l.onnx"
+    )
+  );
+  const enableLipMotion = hasFlag(args, "--enable-lip-motion") && detector === "yolo";
   return {
     runtime,
     detector,
@@ -310,9 +325,11 @@ function webInferenceConfig(args, displayBounds, runtime) {
     retinafaceModel,
     yoloModel,
     gazeModel,
+    lipMotionModel,
     detectorModelUrl: copyModelForRenderer(detectorModel),
     retinafaceModelUrl: copyModelForRenderer(retinafaceModel),
     gazeModelUrl: copyModelForRenderer(gazeModel),
+    lipMotionModelUrl: copyModelForRenderer(lipMotionModel),
     onnxWasmBaseUrl: copyOnnxRuntimeAssetsForRenderer(),
     liteRtWasmBaseUrl: copyLiteRtRuntimeAssetsForRenderer(),
     smoothingAlpha: readNumberOption(args, "--smoothing-alpha", 0.65),
@@ -326,7 +343,8 @@ function webInferenceConfig(args, displayBounds, runtime) {
     eyePositionWeightX: readNumberOption(args, "--eye-position-weight-x", 1),
     eyePositionWeightY: readNumberOption(args, "--eye-position-weight-y", 0.25),
     retinafaceHeadFaceRatio: readNumberOption(args, "--retinaface-head-face-ratio", 1.545),
-    gazeProjectionMode: readOption(args, "--gaze-projection-mode", "legacy")
+    gazeProjectionMode: readOption(args, "--gaze-projection-mode", "legacy"),
+    enableLipMotion
   };
 }
 
@@ -369,8 +387,12 @@ function stopExternalApi() {
   externalApi = null;
 }
 
-function sendToRenderer(payload) {
-  gazeStateStore.updateFromBackendMessage(payload);
+function sendToRenderer(payload, options = {}) {
+  const updateStore = options.updateStore !== false;
+  if (updateStore) {
+    gazeStateStore.updateFromBackendMessage(payload);
+    handleLipMotionMessage(payload);
+  }
   if (payload && payload.type === "status" && (payload.level === "warning" || payload.level === "error")) {
     const log = payload.level === "error" ? console.error : console.warn;
     log(`[renderer-status:${payload.level}] ${payload.message}`);
@@ -379,6 +401,48 @@ function sendToRenderer(payload) {
     mainWindow.webContents.send("backend-message", payload);
   } else {
     pendingMessages.push(payload);
+  }
+}
+
+function createNutMouseAdapter() {
+  return {
+    move: (point) => mouse.setPosition(new Point(point.x, point.y)),
+    press: () => mouse.pressButton(Button.LEFT),
+    release: () => mouse.releaseButton(Button.LEFT)
+  };
+}
+
+function configureLipClickController(args, displayBounds) {
+  const detector = readOption(args, "--detector", "retinaface");
+  const requested = hasFlag(args, "--enable-lip-motion");
+  lipClickController = createLipClickController({
+    mouse: createNutMouseAdapter(),
+    getDisplayBounds: () => displayBounds,
+    logger: console,
+    emitEffect: (payload) => sendToRenderer(payload, { updateStore: false })
+  });
+  lipClickController.setCalibrationActive(hasFlag(args, "--calibrate"));
+  lipClickController.setEnabled(requested && detector === "yolo");
+  if (requested && detector !== "yolo") {
+    sendToRenderer({
+      type: "status",
+      level: "warning",
+      message: "--enable-lip-motion requires --detector yolo; disabling lip motion",
+      detector
+    });
+  }
+}
+
+function handleLipMotionMessage(payload) {
+  if (!lipClickController || !payload) {
+    return;
+  }
+  if (payload.type === "calibration" && payload.status === "saved") {
+    lipClickController.setCalibrationActive(false);
+    return;
+  }
+  if (payload.type === "gaze") {
+    lipClickController.update(payload);
   }
 }
 
@@ -446,6 +510,7 @@ function createWindow() {
     webInference: runtime === "python" ? null : webInferenceConfig(args, bounds, runtime)
   };
   gazeStateStore.initialize(rendererConfig, externalStoreInitOptions(args));
+  configureLipClickController(args, bounds);
   maybeStartExternalApi(args);
 
   mainWindow = new BrowserWindow({
@@ -598,6 +663,7 @@ function startBackend(args, displayBounds) {
   });
 
   backendProcess.on("exit", (code) => {
+    lipClickController?.releaseNow();
     sendToRenderer({ type: "status", level: code === 0 ? "info" : "error", message: `Python backend exited: ${code}` });
   });
 }
@@ -621,7 +687,9 @@ ipcMain.handle("write-calibration", async (_event, filePath, payload) => {
   const resolved = resolveRepoPath(filePath || defaultCalibrationFile);
   try {
     await fs.promises.writeFile(resolved, JSON.stringify(payload, null, 2), "utf8");
-    gazeStateStore.updateFromBackendMessage({ type: "calibration", status: "saved", path: resolved });
+    const message = { type: "calibration", status: "saved", path: resolved };
+    gazeStateStore.updateFromBackendMessage(message);
+    handleLipMotionMessage(message);
     return { ok: true, path: resolved };
   } catch (error) {
     return { ok: false, error: error.message };
@@ -630,12 +698,13 @@ ipcMain.handle("write-calibration", async (_event, filePath, payload) => {
 
 ipcMain.on("publish-backend-message", (_event, payload) => {
   gazeStateStore.updateFromBackendMessage(payload);
+  handleLipMotionMessage(payload);
 });
 
 ipcMain.on("renderer-ready", () => {
   rendererReady = true;
   while (pendingMessages.length > 0) {
-    sendToRenderer(pendingMessages.shift());
+    sendToRenderer(pendingMessages.shift(), { updateStore: false });
   }
 });
 
@@ -667,6 +736,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  lipClickController?.releaseNow();
   stopExternalApi();
   if (backendProcess) {
     backendProcess.kill();
@@ -676,6 +746,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  lipClickController?.releaseNow();
   stopExternalApi();
   if (backendProcess) {
     backendProcess.kill();

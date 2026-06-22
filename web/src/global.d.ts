@@ -66,9 +66,11 @@ export interface WebInferenceConfig {
   retinafaceModel: string;
   yoloModel: string;
   gazeModel: string;
+  lipMotionModel: string;
   detectorModelUrl: string;
   retinafaceModelUrl: string;
   gazeModelUrl: string;
+  lipMotionModelUrl: string;
   onnxWasmBaseUrl: string;
   liteRtWasmBaseUrl: string;
   smoothingAlpha: number;
@@ -83,6 +85,7 @@ export interface WebInferenceConfig {
   eyePositionWeightY: number;
   retinafaceHeadFaceRatio: number;
   gazeProjectionMode: GazeProjectionMode;
+  enableLipMotion: boolean;
 }
 
 export type BackendMessage =
@@ -100,9 +103,13 @@ export type BackendMessage =
       gaze_projection_mode?: GazeProjectionMode;
       detect_inference_ms?: number;
       gaze_inference_ms?: number;
+      lip_motion_inference_ms?: number;
       inference_ms?: number;
       yaw_deg: number;
       pitch_deg: number;
+      mouth_detected?: boolean;
+      mouth_open?: boolean;
+      mouth_open_probability?: number | null;
     }
   | {
       type: "status";
@@ -125,6 +132,9 @@ export type BackendMessage =
       eye_position_weight_y?: number;
       gaze_projection_mode?: GazeProjectionMode;
       gaze_providers?: string[];
+      lip_motion_enabled?: boolean;
+      lip_motion_model?: string;
+      lip_motion_providers?: string[];
     }
   | {
       type: "preview";
@@ -132,6 +142,12 @@ export type BackendMessage =
       head_detected: boolean;
       eye_count: number;
       width_ratio?: number | null;
+    }
+  | {
+      type: "lip_click_effect";
+      effect: "single" | "double";
+      x?: number;
+      y?: number;
     }
   | {
       type: "calibration";

@@ -2,17 +2,22 @@ import type { WebAccelerator, WebInferenceConfig } from "../global";
 import {
   createGazeInput,
   createGazeInputNhwc,
+  createLipMotionInput,
+  createLipMotionInputNhwc,
   createRetinaFaceInput,
   createRetinaFaceInputNhwc,
   createYoloInput,
   createYoloInputNhwc,
   estimateGazeFromModelOutput,
   type Detection,
+  type DetectionResult,
   type GazeEstimate,
   type GazeCrop,
   parseRetinaFaceOutput,
   parseRetinaFaceRawOutput,
   parseYoloOutput,
+  LIP_MOTION_INPUT_HEIGHT,
+  LIP_MOTION_INPUT_WIDTH,
   YOLO_INPUT_HEIGHT,
   YOLO_INPUT_WIDTH
 } from "./core";
@@ -21,8 +26,10 @@ export interface RuntimeModels {
   readonly accelerator: WebAccelerator;
   readonly detectorProviders: string[];
   readonly gazeProviders: string[];
-  detect(frame: ImageData): Promise<{ head: Detection | null; eyes: Detection[] }>;
+  readonly lipMotionProviders: string[];
+  detect(frame: ImageData): Promise<DetectionResult>;
   estimate(frame: ImageData, head: Detection, eyes: Detection[]): Promise<GazeEstimate>;
+  estimateLipMotion(frame: ImageData, mouth: Detection): Promise<number | null>;
   dispose(): void;
 }
 
@@ -44,23 +51,33 @@ async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: 
   const providers = [accelerator];
   const detector = await createOnnxSessionQueued(ort, config.detectorModelUrl, providers);
   let gaze: Awaited<ReturnType<typeof ort.InferenceSession.create>>;
+  let lipMotion: Awaited<ReturnType<typeof ort.InferenceSession.create>> | null = null;
   try {
     if (accelerator === "webgpu") {
       await delay(50);
     }
     gaze = await createOnnxSessionQueued(ort, config.gazeModelUrl, providers);
+    if (config.enableLipMotion && config.detector === "yolo") {
+      lipMotion = await createOnnxSessionQueued(ort, config.lipMotionModelUrl, providers);
+    }
   } catch (error) {
     void detector.release();
+    if (lipMotion !== null) {
+      void lipMotion.release();
+    }
     throw error;
   }
   const detectorInputName = config.detector === "yolo" ? detector.inputNames[0] ?? "images" : "input";
   const detectorOutputName = config.detector === "yolo" ? detector.outputNames[0] ?? "output0" : "batchno_classid_score_x1y1x2y2_landms";
   const gazeInputName = "input";
   const gazeOutputName = "output";
+  const lipMotionInputName = "images";
+  const lipMotionOutputName = "prob_open";
   return {
     accelerator,
     detectorProviders: providers,
     gazeProviders: providers,
+    lipMotionProviders: lipMotion !== null ? providers : [],
     async detect(frame) {
       const input =
         config.detector === "yolo"
@@ -80,9 +97,21 @@ async function createOnnxRuntimeModels(config: WebInferenceConfig, accelerator: 
       const output = results[gazeOutputName] ?? results[gaze.outputNames[0]];
       return estimateFromOutput(output.data as Float32Array, crop);
     },
+    async estimateLipMotion(frame, mouth) {
+      if (lipMotion === null) {
+        return null;
+      }
+      const input = new ort.Tensor("float32", createLipMotionInput(frame, mouth), [1, 3, LIP_MOTION_INPUT_HEIGHT, LIP_MOTION_INPUT_WIDTH]);
+      const results = await lipMotion.run({ [lipMotionInputName]: input });
+      const output = results[lipMotionOutputName] ?? results[lipMotion.outputNames[0]];
+      return Number((output.data as Float32Array)[0]);
+    },
     dispose() {
       void detector.release();
       void gaze.release();
+      if (lipMotion !== null) {
+        void lipMotion.release();
+      }
     }
   };
 }
@@ -115,10 +144,15 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
   await ensureLiteRtLoaded(loadLiteRt, absoluteAssetUrl(config.liteRtWasmBaseUrl));
   const detector = await loadAndCompile(config.detectorModelUrl, { accelerator });
   let gaze: Awaited<ReturnType<typeof loadAndCompile>>;
+  let lipMotion: Awaited<ReturnType<typeof loadAndCompile>> | null = null;
   try {
     gaze = await loadAndCompile(config.gazeModelUrl, { accelerator });
+    if (config.enableLipMotion && config.detector === "yolo") {
+      lipMotion = await loadAndCompile(config.lipMotionModelUrl, { accelerator });
+    }
   } catch (error) {
     detector.delete();
+    lipMotion?.delete();
     throw error;
   }
   const detectorInputShape = Array.from(detector.getInputDetails()[0].shape);
@@ -132,6 +166,7 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
         }
       : null;
   const gazeInputShape = Array.from(gaze.getInputDetails()[0].shape);
+  const lipMotionInputShape = lipMotion !== null ? Array.from(lipMotion.getInputDetails()[0].shape) : null;
   validateLiteRtInputShape(
     config.detector === "yolo" ? "YOLO" : "RetinaFace",
     detectorInputShape,
@@ -146,10 +181,17 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
     [1, 3, 160, 160],
     [1, 160, 160, 3]
   ]);
+  if (lipMotionInputShape !== null) {
+    validateLiteRtInputShape("Lip motion", lipMotionInputShape, [
+      [1, 3, LIP_MOTION_INPUT_HEIGHT, LIP_MOTION_INPUT_WIDTH],
+      [1, LIP_MOTION_INPUT_HEIGHT, LIP_MOTION_INPUT_WIDTH, 3]
+    ]);
+  }
   return {
     accelerator,
     detectorProviders: [detector.isFullyAccelerated ? accelerator : "wasm"],
     gazeProviders: [gaze.isFullyAccelerated ? accelerator : "wasm"],
+    lipMotionProviders: lipMotion !== null ? [lipMotion.isFullyAccelerated ? accelerator : "wasm"] : [],
     async detect(frame) {
       const inputData =
         config.detector === "yolo"
@@ -218,9 +260,33 @@ async function createLiteRtModels(config: WebInferenceConfig, accelerator: WebAc
         }
       }
     },
+    async estimateLipMotion(frame, mouth) {
+      if (lipMotion === null || lipMotionInputShape === null) {
+        return null;
+      }
+      const inputData = isShape(lipMotionInputShape, [1, LIP_MOTION_INPUT_HEIGHT, LIP_MOTION_INPUT_WIDTH, 3])
+        ? createLipMotionInputNhwc(frame, mouth)
+        : createLipMotionInput(frame, mouth);
+      const input = new Tensor(inputData, lipMotionInputShape);
+      const outputs = (await lipMotion.run(input)) as InstanceType<typeof Tensor>[];
+      input.delete();
+      try {
+        const output = await liteRtTensorData(outputs[0]);
+        try {
+          return Number(output.data[0]);
+        } finally {
+          output.delete();
+        }
+      } finally {
+        for (const tensor of outputs) {
+          tensor.delete();
+        }
+      }
+    },
     dispose() {
       detector.delete();
       gaze.delete();
+      lipMotion?.delete();
     }
   };
 }

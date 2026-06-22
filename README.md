@@ -52,14 +52,16 @@ For `--runtime python`:
 
 ```text
 public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx
-public/models/yolomit_n_wholebody28_1x3x480x640.onnx
+public/models/yolomit_t_wholebody28_1x3x480x640.onnx
+public/models/vsdlm_l.onnx
 public/models/gaze_Nx3x160x160.onnx
 ```
 
 For `--runtime onnxweb`, also place:
 
 ```text
-public/models/yolomit_n_wholebody28_1x3x480x640.onnx
+public/models/yolomit_t_wholebody28_1x3x480x640.onnx
+public/models/vsdlm_l.onnx
 public/models/gaze_1x3x160x160.onnx
 ```
 
@@ -67,7 +69,8 @@ For `--runtime litert`, also place:
 
 ```text
 public/models/retinaface_mbn025_wo_postprocess_480x640_float32.tflite
-public/models/yolomit_n_wholebody28_1x3x480x640_float32.tflite
+public/models/yolomit_t_wholebody28_1x3x480x640_float32.tflite
+public/models/vsdlm_l_float32.tflite
 public/models/gaze_1x3x160x160_float32.tflite
 ```
 
@@ -145,7 +148,8 @@ pnpm dev -- \
 - `--backend tensorrt|cuda|cpu`: Python ONNX Runtime execution backend. Default: `tensorrt`. Ignored by web runtimes.
 - `--detector retinaface|yolo`: Eye position detector. Default: `retinaface`.
 - `--retinaface-model`: RetinaFace model path. Default: `public/models/retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx`.
-- `--yolo-model`: YOLO WholeBody28 model path. Defaults to `public/models/yolomit_n_wholebody28_1x3x480x640.onnx` for Python/onnxweb and `public/models/yolomit_n_wholebody28_1x3x480x640_float32.tflite` for LiteRT.
+- `--yolo-model`: YOLO WholeBody28 model path. Defaults to `public/models/yolomit_t_wholebody28_1x3x480x640.onnx` for Python/onnxweb and `public/models/yolomit_t_wholebody28_1x3x480x640_float32.tflite` for LiteRT.
+- `--lip-motion-model`: Lip motion model path. Defaults to `public/models/vsdlm_l.onnx` for Python/onnxweb and `public/models/vsdlm_l_float32.tflite` for LiteRT.
 - `--detector-model`: Directly overrides the selected detector model path.
 - `--display-index`: Target monitor index for the overlay marker. This uses the display order reported by Electron.
 - `--debug-overlay`: Starts as a normal opaque window instead of a transparent overlay and opens DevTools.
@@ -154,7 +158,7 @@ pnpm dev -- \
 - `--camera`: Python runtime uses an OpenCV camera index or video path. Web runtimes use a browser video input index or `deviceId`. Default: `0`.
 - `--camera-resolution`: Camera capture resolution preset or `WIDTHxHEIGHT`. Default: `VGA` (`640x480`). Accepted presets are `QQVGA`, `QVGA`, `VGA`, `SVGA`, `XGA`, `HD`/`720p`, `SXGA`, `UXGA`, `Full HD`/`1080p`, `3MP`, `QHD`/`WQHD`/`1440p`, `5MP`, `6MP`, `4K UHD`, `DCI 4K`, `12MP`, `5K`, `6K`, `8K UHD`, and `12K`. `2MP`, `4MP`, and `8MP` aliases are rejected; use `1920x1080`, `2560x1440`, or `3840x2160` instead.
 - `--camera-fov`: Horizontal camera FOV in degrees. Must be greater than `0` and less than `180`. Default: `90`.
-- `--score-threshold`: Detection score threshold. For YOLO, this applies to Head; Eye uses a fixed `0.20` threshold.
+- `--score-threshold`: Detection score threshold. For YOLO, this applies to Head and Mouth; Eye uses a fixed `0.20` threshold.
 - `--calibration-file`: Path for the 5-point calibration result. Default: `.gaze_calibration.json`.
 - `--calibrate`: Runs 5-point calibration.
 - `--smoothing-alpha`: Horizontal gaze marker smoothing. Larger values are steadier but slower. Default: `0.65`.
@@ -172,10 +176,11 @@ pnpm dev -- \
 - `--eye-position-weight-y`: Weight for the parallel translation correction from the face/eye bbox Y position. Default: `0.25`. Lower this if posture changes make the marker stick to the top or bottom edge.
 - `--retinaface-head-face-ratio`: Static ratio used with RetinaFace to convert Face width to Head-equivalent width. Default: `1.545`.
 - `--gaze-projection-mode legacy|binocular-screen|binocular-convergence`: Screen projection mode. Default: `legacy`.
+- `--enable-lip-motion`: With `--detector yolo`, estimates Mouth class id `19` with `vsdlm_l`; opening the mouth sends a left click at the current gaze point, and a quick open-close-open sequence sends the second click for a normal OS double-click. With RetinaFace this option is ignored with a warning.
 
 If vertical tracking feels too slow while horizontal tracking is acceptable, lower `--smoothing-alpha-y`, for example `--smoothing-alpha-y 0.30`. If vertical movement is too small rather than too slow, try increasing `--eye-position-weight-y` gradually, for example `0.35` or `0.45`.
 
-The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green and Eye detections are drawn in yellow. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
+The PiP preview in the upper-right corner shows the camera image and detection state. The Head/Face-equivalent bbox is drawn in green, Eye detections are drawn in yellow, and Mouth is drawn with the same margin-adjusted bbox used for lip motion input. When gaze estimation succeeds, green line segments are drawn from both eye centers toward the estimated gaze direction. `Head OK / Eyes 2` means the current detection is usable for gaze estimation.
 
 ## External Read-Only API
 
@@ -618,7 +623,8 @@ If the marker sticks to a screen edge after calibration when your face moves up 
 - With RetinaFace, Face width is converted to Head-equivalent width using the static Head/Face ratio `1.545`.
 - By default, RetinaFace left/right eye landmarks are used to compute the gaze-model crop center.
 - `--gaze-projection-mode binocular-screen` and `binocular-convergence` use left/right gaze angles separately; they are experimental approximations and should be calibrated separately from `legacy`.
-- With `--detector yolo`, WholeBody28 class id `7` is Head and class id `17` is Eye; Eye detections use a fixed score threshold of `0.20`.
+- With `--detector yolo`, WholeBody28 class id `7` is Head, class id `17` is Eye, and class id `19` is Mouth. Head and Mouth use `--score-threshold`; Eye uses a fixed score threshold of `0.20`.
+- With `--enable-lip-motion`, Mouth crops include pixel margins of top `2`, bottom `6`, left `2`, and right `2`, are resized to `48x30`, converted to RGB `0.0-1.0`, and passed to `vsdlm_l`; `prob_open >= 0.50` is treated as open.
 
 ## Known Limitations
 

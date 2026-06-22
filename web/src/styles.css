@@ -41,6 +41,140 @@ body,
   will-change: transform, opacity;
 }
 
+.gaze-dot::before,
+.gaze-dot::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.gaze-click-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  min-width: 58px;
+  transform: translateX(-50%);
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  border-radius: 6px;
+  padding: 3px 8px 4px;
+  background: rgba(20, 24, 32, 0.92);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.gaze-dot.single-click-effect {
+  animation: gaze-single-click-core 840ms ease-out;
+}
+
+.gaze-dot.single-click-effect .gaze-click-label {
+  background: rgba(0, 112, 72, 0.94);
+  animation: gaze-click-label-pop 840ms ease-out;
+}
+
+.gaze-dot.single-click-effect::before {
+  border: 3px solid rgba(0, 208, 132, 0.95);
+  animation: gaze-single-click-ring 840ms ease-out;
+}
+
+.gaze-dot.double-click-effect {
+  animation: gaze-double-click-core 1240ms ease-out;
+}
+
+.gaze-dot.double-click-effect .gaze-click-label {
+  min-width: 66px;
+  background: rgba(0, 92, 124, 0.95);
+  animation: gaze-click-label-pop 1240ms ease-out;
+}
+
+.gaze-dot.double-click-effect::before,
+.gaze-dot.double-click-effect::after {
+  border: 3px solid rgba(0, 210, 255, 0.95);
+}
+
+.gaze-dot.double-click-effect::before {
+  animation: gaze-double-click-ring 1240ms ease-out;
+}
+
+.gaze-dot.double-click-effect::after {
+  animation: gaze-double-click-ring 1240ms ease-out 240ms;
+}
+
+@keyframes gaze-single-click-core {
+  0% {
+    background: #00d084;
+    box-shadow:
+      0 0 0 3px rgba(255, 255, 255, 1),
+      0 0 18px rgba(0, 208, 132, 0.92);
+  }
+  100% {
+    background: #ef233c;
+  }
+}
+
+@keyframes gaze-click-label-pop {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(7px) scale(0.86);
+  }
+  16% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1.04);
+  }
+  72% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-7px) scale(0.98);
+  }
+}
+
+@keyframes gaze-single-click-ring {
+  0% {
+    opacity: 0.95;
+    inset: -4px;
+  }
+  100% {
+    opacity: 0;
+    inset: -34px;
+  }
+}
+
+@keyframes gaze-double-click-core {
+  0%,
+  38% {
+    background: #00d2ff;
+    box-shadow:
+      0 0 0 3px rgba(255, 255, 255, 1),
+      0 0 22px rgba(0, 210, 255, 0.95);
+  }
+  100% {
+    background: #ef233c;
+  }
+}
+
+@keyframes gaze-double-click-ring {
+  0% {
+    opacity: 0.95;
+    inset: -4px;
+  }
+  100% {
+    opacity: 0;
+    inset: -42px;
+  }
+}
+
 .camera-marker {
   position: fixed;
   left: -70px;
