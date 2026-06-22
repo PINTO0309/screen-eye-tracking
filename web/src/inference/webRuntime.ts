@@ -117,8 +117,11 @@ export async function startWebRuntime(
       try {
         ctx.drawImage(video, 0, 0, config.cameraWidth, config.cameraHeight);
         const frame = ctx.getImageData(0, 0, config.cameraWidth, config.cameraHeight);
+        const detectStart = performance.now();
         const { head, eyes } = await models.detect(frame);
-        const now = performance.now();
+        const detectEnd = performance.now();
+        const detectInferenceMs = detectEnd - detectStart;
+        const now = detectEnd;
         const shouldEmitPreview = !config.hidePreview && now - lastPreview >= previewInterval;
         if (head === null || eyes.length < 2) {
           if (shouldEmitPreview) {
@@ -129,7 +132,10 @@ export async function startWebRuntime(
           throw new Error(head === null ? "Head was not detected" : "Two eyes were not detected");
         }
 
+        const gazeStart = performance.now();
         const gaze = await models.estimate(frame, head, eyes);
+        const gazeEnd = performance.now();
+        const gazeInferenceMs = gazeEnd - gazeStart;
         if (shouldEmitPreview) {
           emitPreview(frame, head, eyes, null, [gaze.yawDeg, gaze.pitchDeg], config.retinafaceHeadFaceRatio, emit);
           lastPreview = now;
@@ -175,6 +181,9 @@ export async function startWebRuntime(
           eye_position_weight_x: projector.eyePositionWeightX,
           eye_position_weight_y: projector.eyePositionWeightY,
           gaze_projection_mode: config.gazeProjectionMode,
+          detect_inference_ms: detectInferenceMs,
+          gaze_inference_ms: gazeInferenceMs,
+          inference_ms: detectInferenceMs + gazeInferenceMs,
           yaw_deg: gaze.yawDeg,
           pitch_deg: gaze.pitchDeg
         });

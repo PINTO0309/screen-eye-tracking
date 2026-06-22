@@ -215,6 +215,9 @@ GET http://127.0.0.1:47892/snapshot/status
   "eye_position_weight_x": 1,
   "eye_position_weight_y": 0.25,
   "gaze_projection_mode": "binocular-screen",
+  "detect_inference_ms": 4.2,
+  "gaze_inference_ms": 12.5,
+  "inference_ms": 16.7,
   "yaw_deg": 45.64941204243133,
   "pitch_deg": -12.357516307166726,
   "updated_at": "2026-06-21T13:47:46.399Z"
@@ -292,6 +295,9 @@ Result sample.
       "eye_position_weight_x": 1,
       "eye_position_weight_y": 0.25,
       "gaze_projection_mode": "binocular-screen",
+      "detect_inference_ms": 4.2,
+      "gaze_inference_ms": 12.5,
+      "inference_ms": 16.7,
       "yaw_deg": -0.5973023779724806,
       "pitch_deg": -3.642409505603852,
       "updated_at": "2026-06-21T13:49:54.453Z"
@@ -485,6 +491,9 @@ type GazeState = {
     | "legacy"
     | "binocular-screen"
     | "binocular-convergence";
+  detect_inference_ms?: number;
+  gaze_inference_ms?: number;
+  inference_ms?: number;
   yaw_deg?: number;
   pitch_deg?: number;
   updated_at: string;

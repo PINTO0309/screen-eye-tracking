@@ -95,6 +95,9 @@ export type BackendMessage =
       eye_position_weight_x?: number;
       eye_position_weight_y?: number;
       gaze_projection_mode?: GazeProjectionMode;
+      detect_inference_ms?: number;
+      gaze_inference_ms?: number;
+      inference_ms?: number;
       yaw_deg: number;
       pitch_deg: number;
     }

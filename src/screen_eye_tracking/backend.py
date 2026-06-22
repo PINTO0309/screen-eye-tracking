@@ -931,7 +931,9 @@ def main() -> None:
                 time.sleep(0.05)
                 continue
             try:
+                detect_start = time.perf_counter()
                 head, eyes = detector.detect(frame)
+                detect_inference_ms = (time.perf_counter() - detect_start) * 1000.0
                 now = time.monotonic()
                 should_emit_preview = not args.hide_preview and now - last_preview >= preview_interval
                 if should_emit_preview and (head is None or len(eyes) < 2):
@@ -952,7 +954,9 @@ def main() -> None:
                     raise ValueError("Head was not detected")
                 if len(eyes) < 2:
                     raise ValueError("Two eyes were not detected")
+                gaze_start = time.perf_counter()
                 gaze_estimate = gaze.estimate(frame, head, eyes)
+                gaze_inference_ms = (time.perf_counter() - gaze_start) * 1000.0
                 if should_emit_preview:
                     emit_preview(
                         frame,
@@ -1001,6 +1005,9 @@ def main() -> None:
                         "eye_position_weight_x": projector.eye_position_weight_x,
                         "eye_position_weight_y": projector.eye_position_weight_y,
                         "gaze_projection_mode": args.gaze_projection_mode,
+                        "detect_inference_ms": detect_inference_ms,
+                        "gaze_inference_ms": gaze_inference_ms,
+                        "inference_ms": detect_inference_ms + gaze_inference_ms,
                         "yaw_deg": gaze_estimate.yaw_deg,
                         "pitch_deg": gaze_estimate.pitch_deg,
                     }

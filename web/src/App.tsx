@@ -67,6 +67,10 @@ function statusAccelerator(
   return payload.accelerator ?? providerToAccelerator(providers?.[0]);
 }
 
+function formatMs(value: number | undefined): string | null {
+  return value !== undefined && Number.isFinite(value) ? `${value.toFixed(1)}ms` : null;
+}
+
 function App() {
   const [config, setConfig] = useState<RendererConfig | null>(null);
   const [gaze, setGaze] = useState<GazeState | null>(null);
@@ -389,6 +393,12 @@ function App() {
             </div>
           )}
           {gaze?.gaze_projection_mode && <div>Projection {gaze.gaze_projection_mode}</div>}
+          {formatMs(gaze?.inference_ms) && (
+            <div>
+              Infer {formatMs(gaze?.inference_ms)} / det {formatMs(gaze?.detect_inference_ms) ?? "-"} / gaze{" "}
+              {formatMs(gaze?.gaze_inference_ms) ?? "-"}
+            </div>
+          )}
           {modelRuntime.detector && (
             <div>
               Detector {modelRuntime.detector.runtime} / {modelRuntime.detector.accelerator}

@@ -115,7 +115,10 @@ describe("GazeStateStore", () => {
       distance_m: 0.7,
       yaw_deg: 3,
       pitch_deg: -2,
-      gaze_projection_mode: "binocular-screen"
+      gaze_projection_mode: "binocular-screen",
+      detect_inference_ms: 4.2,
+      gaze_inference_ms: 12.5,
+      inference_ms: 16.7
     });
 
     expect(store.getSnapshot().gaze).toMatchObject({
@@ -128,7 +131,10 @@ describe("GazeStateStore", () => {
       confidence: 0.9,
       distance_m: 0.7,
       yaw_deg: 3,
-      pitch_deg: -2
+      pitch_deg: -2,
+      detect_inference_ms: 4.2,
+      gaze_inference_ms: 12.5,
+      inference_ms: 16.7
     });
   });
 

@@ -193,6 +193,9 @@ class GazeStateStore {
         eye_position_weight_x: finiteNumber(payload.eye_position_weight_x),
         eye_position_weight_y: finiteNumber(payload.eye_position_weight_y),
         gaze_projection_mode: stringValue(payload.gaze_projection_mode),
+        detect_inference_ms: finiteNumber(payload.detect_inference_ms),
+        gaze_inference_ms: finiteNumber(payload.gaze_inference_ms),
+        inference_ms: finiteNumber(payload.inference_ms),
         yaw_deg: finiteNumber(payload.yaw_deg),
         pitch_deg: finiteNumber(payload.pitch_deg),
         updated_at: updatedAt
