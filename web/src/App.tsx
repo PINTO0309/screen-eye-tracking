@@ -23,6 +23,11 @@ type ModelRuntimeInfo = {
   accelerator: string;
 };
 
+type ClickEffectState = {
+  id: number;
+  effect: "single" | "double";
+};
+
 const calibrationPoints: [number, number][] = [
   [0.5, 0.5],
   [0.12, 0.12],
@@ -81,6 +86,7 @@ function App() {
   const [calibrationCountdown, setCalibrationCountdown] = useState<number | null>(null);
   const [calibrationIndex, setCalibrationIndex] = useState<number | null>(null);
   const [calibrationDone, setCalibrationDone] = useState(false);
+  const [clickEffect, setClickEffect] = useState<ClickEffectState | null>(null);
   const cameraMarkerRef = useRef<HTMLDivElement>(null);
   const gazeDotRef = useRef<HTMLDivElement>(null);
   const calibrationCountdownRef = useRef<HTMLDivElement>(null);
@@ -126,6 +132,11 @@ function App() {
       }
     } else if (payload.type === "preview") {
       setPreview({ ...payload, receivedAt: Date.now() });
+    } else if (payload.type === "lip_click_effect") {
+      setClickEffect((current) => ({
+        id: (current?.id ?? 0) + 1,
+        effect: payload.effect
+      }));
     } else if (payload.type === "calibration") {
       setStatus(`calibration: ${payload.status}${payload.count ? ` ${payload.count}/5` : ""}`);
       setStatusLevel(payload.status === "saved" ? "info" : "warning");
@@ -260,6 +271,16 @@ function App() {
     };
   }, [gaze]);
 
+  useEffect(() => {
+    if (!clickEffect) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setClickEffect((current) => (current?.id === clickEffect.id ? null : current));
+    }, clickEffect.effect === "double" ? 1240 : 840);
+    return () => window.clearTimeout(timeout);
+  }, [clickEffect]);
+
   const target = calibrationIndex === null || calibrationCountdown !== null ? null : calibrationPoints[calibrationIndex];
   const calibrationActive = calibrationCountdown !== null || calibrationIndex !== null;
   const isCenterCalibrationTarget =
@@ -298,7 +319,7 @@ function App() {
       };
       addElement(cameraMarkerRef.current, 18);
       if (!calibrationActive && gaze && Date.now() - gaze.receivedAt <= 1500) {
-        addElement(gazeDotRef.current, 24);
+        addElement(gazeDotRef.current, 56);
       }
       addElement(calibrationCountdownRef.current, 32);
       addElement(calibrationArrowRef.current, 28);
@@ -333,7 +354,16 @@ function App() {
         <div className="camera-arrow-shape" />
         <div className="camera-label">Camera position</div>
       </div>
-      {!calibrationActive && <div ref={gazeDotRef} className="gaze-dot" style={dotStyle} />}
+      {!calibrationActive && (
+        <div
+          key={clickEffect?.id ?? 0}
+          ref={gazeDotRef}
+          className={`gaze-dot${clickEffect ? ` ${clickEffect.effect}-click-effect` : ""}`}
+          style={dotStyle}
+        >
+          {clickEffect && <span className="gaze-click-label">{clickEffect.effect === "double" ? "Double" : "Single"}</span>}
+        </div>
+      )}
       {calibrationCountdown !== null && (
         <div ref={calibrationCountdownRef} className="calibration-countdown">
           {calibrationCountdown}

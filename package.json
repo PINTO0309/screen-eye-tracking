@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@litertjs/core": "2.5.2",
+    "@nut-tree-fork/nut-js": "4.2.6",
     "@vitejs/plugin-react": "6.0.2",
     "electron": "42.4.1",
     "onnxruntime-web": "1.26.0",

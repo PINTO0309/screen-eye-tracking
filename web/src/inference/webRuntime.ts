@@ -6,6 +6,7 @@ import {
   ScreenProjector,
   clamp01,
   createPreviewImage,
+  LIP_MOTION_OPEN_THRESHOLD,
   type Detection
 } from "./core";
 import { createRuntimeModels, type RuntimeModels } from "./runtimes";
@@ -70,7 +71,10 @@ export async function startWebRuntime(
       eye_position_weight_x: config.eyePositionWeightX,
       eye_position_weight_y: config.eyePositionWeightY,
       gaze_projection_mode: config.gazeProjectionMode,
-      gaze_providers: models.gazeProviders
+      gaze_providers: models.gazeProviders,
+      lip_motion_enabled: config.enableLipMotion && config.detector === "yolo",
+      lip_motion_model: config.enableLipMotion && config.detector === "yolo" ? config.lipMotionModel : undefined,
+      lip_motion_providers: models.lipMotionProviders
     });
 
     const camera = await openCamera(config.camera, config.cameraWidth, config.cameraHeight);
@@ -106,7 +110,7 @@ export async function startWebRuntime(
         ctx.drawImage(video, 0, 0, config.cameraWidth, config.cameraHeight);
         const frame = ctx.getImageData(0, 0, config.cameraWidth, config.cameraHeight);
         const detectStart = performance.now();
-        const { head, eyes } = await models.detect(frame);
+        const { head, eyes, mouth } = await models.detect(frame);
         const detectEnd = performance.now();
         const detectInferenceMs = detectEnd - detectStart;
         const now = detectEnd;
@@ -114,7 +118,7 @@ export async function startWebRuntime(
         if (head === null || eyes.length < 2) {
           if (shouldEmitPreview) {
             const message = head === null ? "Head not detected" : `Eyes detected: ${eyes.length}`;
-            emitPreview(frame, head, eyes, message, null, previewWidthRatio, emit);
+            emitPreview(frame, head, eyes, mouth, message, null, previewWidthRatio, emit);
             lastPreview = now;
           }
           throw new Error(head === null ? "Head was not detected" : "Two eyes were not detected");
@@ -124,8 +128,22 @@ export async function startWebRuntime(
         const gaze = await models.estimate(frame, head, eyes);
         const gazeEnd = performance.now();
         const gazeInferenceMs = gazeEnd - gazeStart;
+        let lipMotionInferenceMs: number | undefined;
+        let mouthOpenProbability: number | null | undefined;
+        let mouthOpen: boolean | undefined;
+        if (config.enableLipMotion && config.detector === "yolo") {
+          if (mouth !== null) {
+            const lipStart = performance.now();
+            mouthOpenProbability = await models.estimateLipMotion(frame, mouth);
+            lipMotionInferenceMs = performance.now() - lipStart;
+            mouthOpen = typeof mouthOpenProbability === "number" && Number.isFinite(mouthOpenProbability) && mouthOpenProbability >= LIP_MOTION_OPEN_THRESHOLD;
+          } else {
+            mouthOpenProbability = null;
+            mouthOpen = false;
+          }
+        }
         if (shouldEmitPreview) {
-          emitPreview(frame, head, eyes, null, [gaze.yawDeg, gaze.pitchDeg], previewWidthRatio, emit);
+          emitPreview(frame, head, eyes, mouth, null, [gaze.yawDeg, gaze.pitchDeg], previewWidthRatio, emit);
           lastPreview = now;
         }
         const distanceM = projector.distanceFromHead(head, headFaceWidthRatio);
@@ -157,7 +175,7 @@ export async function startWebRuntime(
           ];
         }
         const confidence = Math.min(head.score, (eyes[0].score + eyes[1].score) * 0.5);
-        emit({
+        const payload: BackendMessage = {
           type: "gaze",
           x_norm: clamp01(smoothed[0]),
           y_norm: clamp01(smoothed[1]),
@@ -171,10 +189,17 @@ export async function startWebRuntime(
           gaze_projection_mode: config.gazeProjectionMode,
           detect_inference_ms: detectInferenceMs,
           gaze_inference_ms: gazeInferenceMs,
-          inference_ms: detectInferenceMs + gazeInferenceMs,
+          lip_motion_inference_ms: lipMotionInferenceMs,
+          inference_ms: detectInferenceMs + gazeInferenceMs + (lipMotionInferenceMs ?? 0),
           yaw_deg: gaze.yawDeg,
           pitch_deg: gaze.pitchDeg
-        });
+        };
+        if (config.enableLipMotion && config.detector === "yolo") {
+          payload.mouth_detected = mouth !== null;
+          payload.mouth_open = mouthOpen;
+          payload.mouth_open_probability = mouthOpenProbability;
+        }
+        emit(payload);
       } catch (error) {
         const now = performance.now();
         if (models?.accelerator === "webgpu" && !fallbackInProgress && isRecoverableInferenceError(error)) {
@@ -211,7 +236,10 @@ export async function startWebRuntime(
               eye_position_weight_x: config.eyePositionWeightX,
               eye_position_weight_y: config.eyePositionWeightY,
               gaze_projection_mode: config.gazeProjectionMode,
-              gaze_providers: models.gazeProviders
+              gaze_providers: models.gazeProviders,
+              lip_motion_enabled: config.enableLipMotion && config.detector === "yolo",
+              lip_motion_model: config.enableLipMotion && config.detector === "yolo" ? config.lipMotionModel : undefined,
+              lip_motion_providers: models.lipMotionProviders
             });
           } catch (fallbackError) {
             const fallbackPayload: BackendMessage = {
@@ -380,12 +408,13 @@ function emitPreview(
   frame: ImageData,
   head: Detection | null,
   eyes: Detection[],
+  mouth: Detection | null,
   message: string | null,
   gazeAngles: [number, number] | null,
   widthRatio: number | null,
   emit: (payload: BackendMessage) => void
 ): void {
-  const image = createPreviewImage(frame, head, eyes, message, widthRatio, gazeAngles ?? undefined);
+  const image = createPreviewImage(frame, head, eyes, mouth, message, widthRatio, gazeAngles ?? undefined);
   if (!image) {
     return;
   }

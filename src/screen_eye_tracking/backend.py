@@ -20,12 +20,14 @@ import onnxruntime as ort
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RETINAFACE_MODEL = REPO_ROOT / "public" / "models" / "retinaface_mbn025_with_postprocess_480x640_max1000_th0.70.onnx"
-DEFAULT_YOLO_MODEL = REPO_ROOT / "public" / "models" / "yolomit_n_wholebody28_1x3x480x640.onnx"
+DEFAULT_YOLO_MODEL = REPO_ROOT / "public" / "models" / "yolomit_t_wholebody28_1x3x480x640.onnx"
 DEFAULT_GAZE_MODEL = REPO_ROOT / "public" / "models" / "gaze_Nx3x160x160.onnx"
+DEFAULT_LIP_MOTION_MODEL = REPO_ROOT / "public" / "models" / "vsdlm_l.onnx"
 DEFAULT_CALIBRATION_FILE = REPO_ROOT / ".gaze_calibration.json"
 
 HEAD_CLASS_ID = 7
 EYE_CLASS_ID = 17
+MOUTH_CLASS_ID = 19
 AVERAGE_HEAD_WIDTH_M = 0.16
 RETINAFACE_HEAD_FACE_WIDTH_RATIO = 1.545
 CAMERA_WIDTH = 640
@@ -37,6 +39,13 @@ YOLO_INPUT_HEIGHT = 480
 YOLO_CLASS_COUNT = 28
 YOLO_EYE_SCORE_THRESHOLD = 0.20
 YOLO_NMS_IOU_THRESHOLD = 0.45
+LIP_MOTION_INPUT_WIDTH = 48
+LIP_MOTION_INPUT_HEIGHT = 30
+LIP_MOTION_OPEN_THRESHOLD = 0.50
+LIP_MOTION_MARGIN_TOP = 2
+LIP_MOTION_MARGIN_BOTTOM = 6
+LIP_MOTION_MARGIN_LEFT = 2
+LIP_MOTION_MARGIN_RIGHT = 2
 IRIS_IDX_481 = np.asarray([248, 252, 224, 228, 232, 236, 240, 244], dtype=np.int64)
 
 
@@ -97,6 +106,13 @@ class Detection:
     @property
     def center(self) -> tuple[float, float]:
         return ((self.x1 + self.x2) * 0.5, (self.y1 + self.y2) * 0.5)
+
+
+@dataclass(frozen=True)
+class DetectionResult:
+    head: Detection | None
+    eyes: list[Detection]
+    mouth: Detection | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +212,33 @@ def draw_box(image: np.ndarray, detection: Detection, color: tuple[int, int, int
     cv2.putText(image, text, (x1, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
 
 
+def detection_with_margin(
+    image: np.ndarray,
+    detection: Detection,
+    margin_top: int = 0,
+    margin_bottom: int = 0,
+    margin_left: int = 0,
+    margin_right: int = 0,
+) -> Detection:
+    image_h, image_w = image.shape[:2]
+    x1 = max(0, min(image_w - 1, int(math.floor(detection.x1)) - margin_left))
+    y1 = max(0, min(image_h - 1, int(math.floor(detection.y1)) - margin_top))
+    x2 = max(x1 + 1, min(image_w, int(math.ceil(detection.x2)) + margin_right))
+    y2 = max(y1 + 1, min(image_h, int(math.ceil(detection.y2)) + margin_bottom))
+    return Detection(detection.class_id, detection.score, float(x1), float(y1), float(x2), float(y2))
+
+
+def mouth_detection_with_margin(image: np.ndarray, mouth: Detection) -> Detection:
+    return detection_with_margin(
+        image,
+        mouth,
+        margin_top=LIP_MOTION_MARGIN_TOP,
+        margin_bottom=LIP_MOTION_MARGIN_BOTTOM,
+        margin_left=LIP_MOTION_MARGIN_LEFT,
+        margin_right=LIP_MOTION_MARGIN_RIGHT,
+    )
+
+
 def draw_gaze_lines(image: np.ndarray, eyes: list[Detection], yaw_deg: float, pitch_deg: float) -> None:
     diag = math.sqrt(float(image.shape[0] * image.shape[1]))
     length = 0.4 * diag
@@ -249,6 +292,19 @@ def select_eye_pair(head: Detection, eyes: Iterable[Detection]) -> list[Detectio
     return sorted(best_pair, key=lambda det: det.center[0])
 
 
+def select_best_in_head(head: Detection, detections: Iterable[Detection]) -> Detection | None:
+    margin_x = head.width * 0.20
+    margin_y = head.height * 0.20
+    candidates = []
+    for detection in detections:
+        cx, cy = detection.center
+        if head.x1 - margin_x <= cx <= head.x2 + margin_x and head.y1 - margin_y <= cy <= head.y2 + margin_y:
+            candidates.append(detection)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda det: det.score)
+
+
 def parse_yolo_output(
     output: np.ndarray,
     score_threshold: float,
@@ -256,7 +312,7 @@ def parse_yolo_output(
     image_h: int = CAMERA_HEIGHT,
     input_w: int = YOLO_INPUT_WIDTH,
     input_h: int = YOLO_INPUT_HEIGHT,
-) -> tuple[Detection | None, list[Detection]]:
+) -> DetectionResult:
     values = np.asarray(output, dtype=np.float32)
     if values.ndim == 3 and values.shape[0] == 1:
         values = values[0]
@@ -267,6 +323,7 @@ def parse_yolo_output(
     scale_y = float(image_h) / float(input_h)
     heads: list[Detection] = []
     eyes: list[Detection] = []
+    mouths: list[Detection] = []
     for index in range(values.shape[1]):
         cx = float(values[0, index])
         cy = float(values[1, index])
@@ -286,19 +343,24 @@ def parse_yolo_output(
         eye_score = float(values[4 + EYE_CLASS_ID, index])
         if math.isfinite(eye_score) and eye_score >= YOLO_EYE_SCORE_THRESHOLD:
             eyes.append(Detection(EYE_CLASS_ID, eye_score, x1, y1, x2, y2))
+        mouth_score = float(values[4 + MOUTH_CLASS_ID, index])
+        if math.isfinite(mouth_score) and mouth_score >= score_threshold:
+            mouths.append(Detection(MOUTH_CLASS_ID, mouth_score, x1, y1, x2, y2))
 
     heads = nms_detections(heads, YOLO_NMS_IOU_THRESHOLD)
     eyes = nms_detections(eyes, YOLO_NMS_IOU_THRESHOLD)
+    mouths = nms_detections(mouths, YOLO_NMS_IOU_THRESHOLD)
     if not heads:
-        return None, []
+        return DetectionResult(None, [])
     head = heads[0]
-    return head, select_eye_pair(head, eyes)
+    return DetectionResult(head, select_eye_pair(head, eyes), select_best_in_head(head, mouths))
 
 
 def emit_preview(
     frame: np.ndarray,
     head: Detection | None,
     eyes: list[Detection],
+    mouth: Detection | None = None,
     message: str | None = None,
     width_ratio: float | None = None,
     gaze_angles: tuple[float, float] | None = None,
@@ -310,6 +372,8 @@ def emit_preview(
         draw_box(preview, eye, (0, 210, 255), "Eye")
         cx, cy = [int(round(v)) for v in eye.center]
         cv2.circle(preview, (cx, cy), 4, (0, 210, 255), -1)
+    if mouth is not None:
+        draw_box(preview, mouth_detection_with_margin(preview, mouth), (0, 120, 255), "Mouth")
     if gaze_angles is not None and len(eyes) >= 2:
         draw_gaze_lines(preview, eyes, gaze_angles[0], gaze_angles[1])
     if message:
@@ -379,6 +443,22 @@ def transform_points3d(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return transformed
 
 
+def crop_detection(
+    image: np.ndarray,
+    detection: Detection,
+    width: int,
+    height: int,
+    margin_top: int = 0,
+    margin_bottom: int = 0,
+    margin_left: int = 0,
+    margin_right: int = 0,
+) -> np.ndarray:
+    crop_area = detection_with_margin(image, detection, margin_top, margin_bottom, margin_left, margin_right)
+    x1, y1, x2, y2 = [int(v) for v in (crop_area.x1, crop_area.y1, crop_area.x2, crop_area.y2)]
+    crop = image[y1:y2, x1:x2]
+    return cv2.resize(crop, (width, height), interpolation=cv2.INTER_LINEAR)
+
+
 class YoloWholebodyDetector:
     def __init__(self, model_path: Path, backend: str, score_threshold: float) -> None:
         self.model_path = model_path
@@ -396,13 +476,46 @@ class YoloWholebodyDetector:
         if self.output.name != "output0" or list(self.output.shape) != [1, 4 + YOLO_CLASS_COUNT, 6300]:
             raise RuntimeError(f"Unexpected YOLO output: {self.output.name} {self.output.shape}")
 
-    def detect(self, frame: np.ndarray) -> tuple[Detection | None, list[Detection]]:
+    def detect(self, frame: np.ndarray) -> DetectionResult:
         image_h, image_w = frame.shape[:2]
         resized = cv2.resize(frame, (YOLO_INPUT_WIDTH, YOLO_INPUT_HEIGHT), interpolation=cv2.INTER_LINEAR)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         input_tensor = rgb.transpose(2, 0, 1)[None, ...].astype(np.float32)
         output = self.session.run([self.output.name], {self.input.name: input_tensor})[0]
         return parse_yolo_output(output, self.score_threshold, image_w, image_h)
+
+
+class LipMotionEstimator:
+    def __init__(self, model_path: Path, backend: str) -> None:
+        self.model_path = model_path
+        providers = build_providers(backend, model_path)
+        self.session = ort.InferenceSession(str(model_path), sess_options=session_options(), providers=providers)
+        self.input = self.session.get_inputs()[0]
+        self.output = self.session.get_outputs()[0]
+        self.providers = self.session.get_providers()
+        self._validate_model()
+
+    def _validate_model(self) -> None:
+        if self.input.name != "images" or list(self.input.shape) != [1, 3, LIP_MOTION_INPUT_HEIGHT, LIP_MOTION_INPUT_WIDTH]:
+            raise RuntimeError(f"Unexpected lip motion input: {self.input.name} {self.input.shape}")
+        if self.output.name != "prob_open" or list(self.output.shape) != [1]:
+            raise RuntimeError(f"Unexpected lip motion output: {self.output.name} {self.output.shape}")
+
+    def estimate(self, frame: np.ndarray, mouth: Detection) -> float:
+        crop = crop_detection(
+            frame,
+            mouth,
+            LIP_MOTION_INPUT_WIDTH,
+            LIP_MOTION_INPUT_HEIGHT,
+            margin_top=LIP_MOTION_MARGIN_TOP,
+            margin_bottom=LIP_MOTION_MARGIN_BOTTOM,
+            margin_left=LIP_MOTION_MARGIN_LEFT,
+            margin_right=LIP_MOTION_MARGIN_RIGHT,
+        )
+        rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        input_tensor = rgb.transpose(2, 0, 1)[None, ...].astype(np.float32)
+        output = self.session.run([self.output.name], {self.input.name: input_tensor})[0]
+        return float(np.asarray(output, dtype=np.float32).reshape(-1)[0])
 
 
 class RetinaFaceEyeDetector:
@@ -423,18 +536,18 @@ class RetinaFaceEyeDetector:
         if self.output.name != "batchno_classid_score_x1y1x2y2_landms":
             raise RuntimeError(f"Unexpected RetinaFace output: {self.output.name} {self.output.shape}")
 
-    def detect(self, frame: np.ndarray) -> tuple[Detection | None, list[Detection]]:
+    def detect(self, frame: np.ndarray) -> DetectionResult:
         image_h, image_w = frame.shape[:2]
         resized = cv2.resize(frame, (640, 480), interpolation=cv2.INTER_LINEAR)
         input_tensor = resized[..., ::-1].astype(np.float32)
         input_tensor = (input_tensor - self.mean).transpose(2, 0, 1)[None, ...].astype(np.float32)
         output = self.session.run([self.output.name], {self.input.name: input_tensor})[0]
         if len(output) == 0:
-            return None, []
+            return DetectionResult(None, [])
 
         faces = [row for row in output if float(row[2]) >= self.score_threshold]
         if not faces:
-            return None, []
+            return DetectionResult(None, [])
         face = max(faces, key=lambda row: float(row[2]))
         score = float(face[2])
         x1 = max(0.0, min(float(image_w - 1), float(face[3]) * image_w / 640.0))
@@ -442,7 +555,7 @@ class RetinaFaceEyeDetector:
         x2 = max(0.0, min(float(image_w - 1), float(face[5]) * image_w / 640.0))
         y2 = max(0.0, min(float(image_h - 1), float(face[6]) * image_h / 480.0))
         if x2 <= x1 or y2 <= y1:
-            return None, []
+            return DetectionResult(None, [])
 
         head = Detection(HEAD_CLASS_ID, score, x1, y1, x2, y2)
         right_eye = (float(face[7]) * image_w / 640.0, float(face[8]) * image_h / 480.0)
@@ -452,7 +565,7 @@ class RetinaFaceEyeDetector:
             self._eye_detection(left_eye, eye_box_size, score),
             self._eye_detection(right_eye, eye_box_size, score),
         ]
-        return head, sorted(eyes, key=lambda det: det.center[0])
+        return DetectionResult(head, sorted(eyes, key=lambda det: det.center[0]))
 
     @staticmethod
     def _eye_detection(center: tuple[float, float], size: float, score: float) -> Detection:
@@ -818,6 +931,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retinaface-model", type=Path, default=DEFAULT_RETINAFACE_MODEL)
     parser.add_argument("--yolo-model", type=Path, default=DEFAULT_YOLO_MODEL)
     parser.add_argument("--gaze-model", type=Path, default=DEFAULT_GAZE_MODEL)
+    parser.add_argument("--lip-motion-model", type=Path, default=DEFAULT_LIP_MOTION_MODEL)
+    parser.add_argument("--enable-lip-motion", action="store_true")
     parser.add_argument("--smoothing-alpha", type=float, default=0.65)
     parser.add_argument("--smoothing-alpha-y", type=float, default=0.45)
     parser.add_argument("--preview-fps", type=float, default=8.0)
@@ -884,6 +999,17 @@ def main() -> None:
     else:
         detector = YoloWholebodyDetector(detector_model, args.backend, args.score_threshold)
     head_face_width_ratio = args.retinaface_head_face_ratio if args.detector == "retinaface" else 1.0
+    lip_motion_enabled = args.enable_lip_motion and args.detector == "yolo"
+    if args.enable_lip_motion and args.detector != "yolo":
+        emit(
+            {
+                "type": "status",
+                "level": "warning",
+                "message": "--enable-lip-motion requires --detector yolo; disabling lip motion",
+                "detector": args.detector,
+            }
+        )
+    lip_motion = LipMotionEstimator(args.lip_motion_model, args.backend) if lip_motion_enabled else None
     gaze = GazeEstimator(args.gaze_model, args.backend)
     projector = ScreenProjector(
         display,
@@ -916,6 +1042,9 @@ def main() -> None:
             "eye_position_weight_y": projector.eye_position_weight_y,
             "gaze_projection_mode": args.gaze_projection_mode,
             "gaze_providers": gaze.providers,
+            "lip_motion_enabled": lip_motion_enabled,
+            "lip_motion_model": str(args.lip_motion_model) if lip_motion_enabled else None,
+            "lip_motion_providers": lip_motion.providers if lip_motion is not None else None,
         }
     )
 
@@ -971,7 +1100,8 @@ def main() -> None:
                 continue
             try:
                 detect_start = time.perf_counter()
-                head, eyes = detector.detect(frame)
+                detection = detector.detect(frame)
+                head, eyes, mouth = detection.head, detection.eyes, detection.mouth
                 detect_inference_ms = (time.perf_counter() - detect_start) * 1000.0
                 now = time.monotonic()
                 should_emit_preview = not args.hide_preview and now - last_preview >= preview_interval
@@ -985,6 +1115,7 @@ def main() -> None:
                         frame,
                         head,
                         eyes,
+                        mouth,
                         preview_message,
                         head_face_width_ratio if args.detector == "retinaface" else None,
                     )
@@ -996,11 +1127,23 @@ def main() -> None:
                 gaze_start = time.perf_counter()
                 gaze_estimate = gaze.estimate(frame, head, eyes)
                 gaze_inference_ms = (time.perf_counter() - gaze_start) * 1000.0
+                mouth_open_probability: float | None = None
+                mouth_open: bool | None = None
+                lip_motion_inference_ms: float | None = None
+                if lip_motion is not None:
+                    if mouth is not None:
+                        lip_motion_start = time.perf_counter()
+                        mouth_open_probability = lip_motion.estimate(frame, mouth)
+                        lip_motion_inference_ms = (time.perf_counter() - lip_motion_start) * 1000.0
+                        mouth_open = bool(mouth_open_probability >= LIP_MOTION_OPEN_THRESHOLD)
+                    else:
+                        mouth_open = False
                 if should_emit_preview:
                     emit_preview(
                         frame,
                         head,
                         eyes,
+                        mouth,
                         None,
                         head_face_width_ratio if args.detector == "retinaface" else None,
                         (gaze_estimate.yaw_deg, gaze_estimate.pitch_deg),
@@ -1031,26 +1174,34 @@ def main() -> None:
                         alpha_y * smoothed[1] + (1.0 - alpha_y) * corrected[1],
                     )
                 confidence = min(head.score, (eyes[0].score + eyes[1].score) * 0.5)
-                emit(
-                    {
-                        "type": "gaze",
-                        "x_norm": clamp01(smoothed[0]),
-                        "y_norm": clamp01(smoothed[1]),
-                        "raw_x_norm": raw[0],
-                        "raw_y_norm": raw[1],
-                        "confidence": confidence,
-                        "distance_m": distance_m,
-                        "head_face_width_ratio": head_face_width_ratio,
-                        "eye_position_weight_x": projector.eye_position_weight_x,
-                        "eye_position_weight_y": projector.eye_position_weight_y,
-                        "gaze_projection_mode": args.gaze_projection_mode,
-                        "detect_inference_ms": detect_inference_ms,
-                        "gaze_inference_ms": gaze_inference_ms,
-                        "inference_ms": detect_inference_ms + gaze_inference_ms,
-                        "yaw_deg": gaze_estimate.yaw_deg,
-                        "pitch_deg": gaze_estimate.pitch_deg,
-                    }
-                )
+                payload = {
+                    "type": "gaze",
+                    "x_norm": clamp01(smoothed[0]),
+                    "y_norm": clamp01(smoothed[1]),
+                    "raw_x_norm": raw[0],
+                    "raw_y_norm": raw[1],
+                    "confidence": confidence,
+                    "distance_m": distance_m,
+                    "head_face_width_ratio": head_face_width_ratio,
+                    "eye_position_weight_x": projector.eye_position_weight_x,
+                    "eye_position_weight_y": projector.eye_position_weight_y,
+                    "gaze_projection_mode": args.gaze_projection_mode,
+                    "detect_inference_ms": detect_inference_ms,
+                    "gaze_inference_ms": gaze_inference_ms,
+                    "inference_ms": detect_inference_ms + gaze_inference_ms + (lip_motion_inference_ms or 0.0),
+                    "yaw_deg": gaze_estimate.yaw_deg,
+                    "pitch_deg": gaze_estimate.pitch_deg,
+                }
+                if lip_motion_enabled:
+                    payload.update(
+                        {
+                            "mouth_detected": mouth is not None,
+                            "mouth_open": mouth_open,
+                            "mouth_open_probability": mouth_open_probability,
+                            "lip_motion_inference_ms": lip_motion_inference_ms,
+                        }
+                    )
+                emit(payload)
             except Exception as exc:
                 now = time.monotonic()
                 if now - last_status > 1.0:

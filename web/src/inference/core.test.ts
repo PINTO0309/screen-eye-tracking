@@ -3,6 +3,8 @@ import {
   Calibration,
   DisplayGeometry,
   ScreenProjector,
+  createLipMotionInput,
+  createLipMotionInputNhwc,
   estimateGazeFromModelOutput,
   parseCameraResolution,
   parseRetinaFaceOutput,
@@ -238,6 +240,58 @@ describe("YOLO WholeBody28 parser", () => {
     expect(result.eyes).toHaveLength(2);
     expect(result.eyes[0].score).toBeCloseTo(0.7);
     expect(result.eyes[1].score).toBeCloseTo(0.65);
+  });
+
+  it("selects Mouth class 19 with the normal score threshold inside the head", () => {
+    const lowOutput = yoloOutput(2);
+    setYoloBox(lowOutput, 2, 0, 320, 240, 220, 220);
+    setYoloScore(lowOutput, 2, 0, 7, 0.9);
+    setYoloBox(lowOutput, 2, 1, 320, 300, 40, 20);
+    setYoloScore(lowOutput, 2, 1, 19, 0.49);
+
+    expect(parseYoloOutput(lowOutput, 0.5).mouth).toBeNull();
+
+    const output = yoloOutput(5);
+    setYoloBox(output, 5, 0, 320, 240, 220, 220);
+    setYoloScore(output, 5, 0, 7, 0.9);
+    setYoloBox(output, 5, 1, 320, 300, 40, 20);
+    setYoloScore(output, 5, 1, 19, 0.19);
+    setYoloBox(output, 5, 2, 320, 300, 40, 20);
+    setYoloScore(output, 5, 2, 19, 0.6);
+    setYoloBox(output, 5, 3, 322, 301, 40, 20);
+    setYoloScore(output, 5, 3, 19, 0.5);
+    setYoloBox(output, 5, 4, 600, 450, 40, 20);
+    setYoloScore(output, 5, 4, 19, 0.95);
+
+    const result = parseYoloOutput(output, 0.5);
+
+    expect(result.mouth?.classId).toBe(19);
+    expect(result.mouth?.score).toBeCloseTo(0.6);
+  });
+
+  it("creates RGB 0-1 lip motion crops with VSDLM margins in NCHW and NHWC layouts", () => {
+    const data = new Uint8ClampedArray(4 * 4 * 4);
+    for (let i = 0; i < 16; i += 1) {
+      const offset = i * 4;
+      data[offset] = i;
+      data[offset + 1] = i + 16;
+      data[offset + 2] = i + 32;
+      data[offset + 3] = 255;
+    }
+    const frame = { data, width: 4, height: 4 } as ImageData;
+    const mouth = { classId: 19, score: 1, x1: 1, y1: 1, x2: 3, y2: 3 };
+
+    const nchw = createLipMotionInput(frame, mouth);
+    const nhwc = createLipMotionInputNhwc(frame, mouth);
+
+    expect(nchw).toHaveLength(3 * 30 * 48);
+    expect(nhwc).toHaveLength(30 * 48 * 3);
+    expect(nchw[0]).toBeCloseTo(0 / 255);
+    expect(nchw[30 * 48]).toBeCloseTo(16 / 255);
+    expect(nchw[30 * 48 * 2]).toBeCloseTo(32 / 255);
+    expect(nhwc[0]).toBeCloseTo(0 / 255);
+    expect(nhwc[1]).toBeCloseTo(16 / 255);
+    expect(nhwc[2]).toBeCloseTo(32 / 255);
   });
 });
 

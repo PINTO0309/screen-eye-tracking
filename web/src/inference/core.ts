@@ -12,6 +12,14 @@ export const YOLO_NMS_IOU_THRESHOLD = 0.45;
 export const GAZE_INPUT_SIZE = 160;
 export const HEAD_CLASS_ID = 7;
 export const EYE_CLASS_ID = 17;
+export const MOUTH_CLASS_ID = 19;
+export const LIP_MOTION_INPUT_WIDTH = 48;
+export const LIP_MOTION_INPUT_HEIGHT = 30;
+export const LIP_MOTION_OPEN_THRESHOLD = 0.5;
+export const LIP_MOTION_MARGIN_TOP = 2;
+export const LIP_MOTION_MARGIN_BOTTOM = 6;
+export const LIP_MOTION_MARGIN_LEFT = 2;
+export const LIP_MOTION_MARGIN_RIGHT = 2;
 export const AVERAGE_HEAD_WIDTH_M = 0.16;
 export const CAMERA_HORIZONTAL_FOV_DEG = 90;
 const IRIS_IDX_481 = [248, 252, 224, 228, 232, 236, 240, 244];
@@ -92,6 +100,12 @@ export interface Detection {
   y1: number;
   x2: number;
   y2: number;
+}
+
+export interface DetectionResult {
+  head: Detection | null;
+  eyes: Detection[];
+  mouth: Detection | null;
 }
 
 export interface GazeEstimate {
@@ -212,15 +226,34 @@ export function createYoloInputNhwc(frame: ImageData): Float32Array {
   return input;
 }
 
+export function createLipMotionInput(frame: ImageData, mouth: Detection): Float32Array {
+  const input = new Float32Array(1 * 3 * LIP_MOTION_INPUT_HEIGHT * LIP_MOTION_INPUT_WIDTH);
+  const plane = LIP_MOTION_INPUT_HEIGHT * LIP_MOTION_INPUT_WIDTH;
+  forEachDetectionPixel(frame, mouth, LIP_MOTION_INPUT_WIDTH, LIP_MOTION_INPUT_HEIGHT, (dst, src) => {
+    input[dst] = frame.data[src] / 255;
+    input[plane + dst] = frame.data[src + 1] / 255;
+    input[plane * 2 + dst] = frame.data[src + 2] / 255;
+  });
+  return input;
+}
+
+export function createLipMotionInputNhwc(frame: ImageData, mouth: Detection): Float32Array {
+  const input = new Float32Array(1 * LIP_MOTION_INPUT_HEIGHT * LIP_MOTION_INPUT_WIDTH * 3);
+  forEachDetectionPixel(frame, mouth, LIP_MOTION_INPUT_WIDTH, LIP_MOTION_INPUT_HEIGHT, (dstPixel, src) => {
+    const dst = dstPixel * 3;
+    input[dst] = frame.data[src] / 255;
+    input[dst + 1] = frame.data[src + 1] / 255;
+    input[dst + 2] = frame.data[src + 2] / 255;
+  });
+  return input;
+}
+
 export function parseYoloOutput(
   output: ArrayLike<number>,
   scoreThreshold: number,
   targetWidth = CAMERA_WIDTH,
   targetHeight = CAMERA_HEIGHT
-): {
-  head: Detection | null;
-  eyes: Detection[];
-} {
+): DetectionResult {
   const rowSize = 4 + YOLO_CLASS_COUNT;
   if (output.length % rowSize !== 0) {
     throw new Error(`Unexpected YOLO output length ${output.length}`);
@@ -230,6 +263,7 @@ export function parseYoloOutput(
   const scaleY = targetHeight / YOLO_INPUT_HEIGHT;
   const heads: Detection[] = [];
   const eyes: Detection[] = [];
+  const mouths: Detection[] = [];
 
   for (let index = 0; index < candidateCount; index += 1) {
     const cx = Number(output[index]);
@@ -255,14 +289,22 @@ export function parseYoloOutput(
     if (Number.isFinite(eyeScore) && eyeScore >= YOLO_EYE_SCORE_THRESHOLD) {
       eyes.push({ classId: EYE_CLASS_ID, score: eyeScore, x1, y1, x2, y2 });
     }
+    const mouthScore = Number(output[candidateCount * (4 + MOUTH_CLASS_ID) + index]);
+    if (Number.isFinite(mouthScore) && mouthScore >= scoreThreshold) {
+      mouths.push({ classId: MOUTH_CLASS_ID, score: mouthScore, x1, y1, x2, y2 });
+    }
   }
 
   const selectedHeads = nmsDetections(heads, YOLO_NMS_IOU_THRESHOLD);
   if (selectedHeads.length === 0) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
   const head = selectedHeads[0];
-  return { head, eyes: selectEyePair(head, nmsDetections(eyes, YOLO_NMS_IOU_THRESHOLD)) };
+  return {
+    head,
+    eyes: selectEyePair(head, nmsDetections(eyes, YOLO_NMS_IOU_THRESHOLD)),
+    mouth: selectBestInHead(head, nmsDetections(mouths, YOLO_NMS_IOU_THRESHOLD))
+  };
 }
 
 export function parseRetinaFaceOutput(
@@ -270,10 +312,7 @@ export function parseRetinaFaceOutput(
   scoreThreshold: number,
   targetWidth = CAMERA_WIDTH,
   targetHeight = CAMERA_HEIGHT
-): {
-  head: Detection | null;
-  eyes: Detection[];
-} {
+): DetectionResult {
   const rowSize = 17;
   let bestOffset = -1;
   let bestScore = -Infinity;
@@ -285,7 +324,7 @@ export function parseRetinaFaceOutput(
     }
   }
   if (bestOffset < 0) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const x1 = scaleRetinaFaceX(Number(output[bestOffset + 3]), targetWidth);
@@ -293,7 +332,7 @@ export function parseRetinaFaceOutput(
   const x2 = scaleRetinaFaceX(Number(output[bestOffset + 5]), targetWidth);
   const y2 = scaleRetinaFaceY(Number(output[bestOffset + 6]), targetHeight);
   if (x2 <= x1 || y2 <= y1) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
   const head: Detection = { classId: HEAD_CLASS_ID, score: bestScore, x1, y1, x2, y2 };
   const rightEye: [number, number] = [
@@ -308,7 +347,7 @@ export function parseRetinaFaceOutput(
   const eyes = [eyeDetection(leftEye, eyeBoxSize, bestScore), eyeDetection(rightEye, eyeBoxSize, bestScore)].sort(
     (a, b) => center(a)[0] - center(b)[0]
   );
-  return { head, eyes };
+  return { head, eyes, mouth: null };
 }
 
 export function parseRetinaFacePreNmsOutput(
@@ -318,10 +357,7 @@ export function parseRetinaFacePreNmsOutput(
   scoreThreshold: number,
   targetWidth = CAMERA_WIDTH,
   targetHeight = CAMERA_HEIGHT
-): {
-  head: Detection | null;
-  eyes: Detection[];
-} {
+): DetectionResult {
   const threshold = Math.max(scoreThreshold, RETINAFACE_SCORE_THRESHOLD_FLOOR);
   const candidateCount = Math.min(Math.floor(boxes.length / 4), scores.length, Math.floor(landms.length / 10));
   let bestIndex = -1;
@@ -334,7 +370,7 @@ export function parseRetinaFacePreNmsOutput(
     }
   }
   if (bestIndex < 0) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const boxOffset = bestIndex * 4;
@@ -343,14 +379,14 @@ export function parseRetinaFacePreNmsOutput(
   const rawX2 = Number(boxes[boxOffset + 2]);
   const rawY2 = Number(boxes[boxOffset + 3]);
   if (![rawX1, rawY1, rawX2, rawY2].every(Number.isFinite)) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
   const x1 = scaleRetinaFaceX(rawX1, targetWidth);
   const y1 = scaleRetinaFaceY(rawY1, targetHeight);
   const x2 = scaleRetinaFaceX(rawX2, targetWidth);
   const y2 = scaleRetinaFaceY(rawY2, targetHeight);
   if (x2 <= x1 || y2 <= y1) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const landmOffset = bestIndex * 10;
@@ -363,7 +399,7 @@ export function parseRetinaFacePreNmsOutput(
     scaleRetinaFaceY(Number(landms[landmOffset + 3]), targetHeight)
   ];
   if (!isFinitePoint(rightEye) || !isFinitePoint(leftEye)) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const head: Detection = { classId: HEAD_CLASS_ID, score: bestScore, x1, y1, x2, y2 };
@@ -371,7 +407,7 @@ export function parseRetinaFacePreNmsOutput(
   const eyes = [eyeDetection(leftEye, eyeBoxSize, bestScore), eyeDetection(rightEye, eyeBoxSize, bestScore)].sort(
     (a, b) => center(a)[0] - center(b)[0]
   );
-  return { head, eyes };
+  return { head, eyes, mouth: null };
 }
 
 export function parseRetinaFaceRawOutput(
@@ -381,10 +417,7 @@ export function parseRetinaFaceRawOutput(
   scoreThreshold: number,
   targetWidth = CAMERA_WIDTH,
   targetHeight = CAMERA_HEIGHT
-): {
-  head: Detection | null;
-  eyes: Detection[];
-} {
+): DetectionResult {
   const threshold = Math.max(scoreThreshold, RETINAFACE_SCORE_THRESHOLD_FLOOR);
   const priors = getRetinaFacePriors();
   const candidateCount = Math.min(
@@ -404,7 +437,7 @@ export function parseRetinaFaceRawOutput(
     }
   }
   if (bestIndex < 0) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const priorOffset = bestIndex * 4;
@@ -422,7 +455,7 @@ export function parseRetinaFaceRawOutput(
   const rawX2 = (cx + boxW * 0.5) * RETINAFACE_INPUT_WIDTH;
   const rawY2 = (cy + boxH * 0.5) * RETINAFACE_INPUT_HEIGHT;
   if (![rawX1, rawY1, rawX2, rawY2].every(Number.isFinite)) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const x1 = scaleRetinaFaceX(rawX1, targetWidth);
@@ -430,14 +463,14 @@ export function parseRetinaFaceRawOutput(
   const x2 = scaleRetinaFaceX(rawX2, targetWidth);
   const y2 = scaleRetinaFaceY(rawY2, targetHeight);
   if (x2 <= x1 || y2 <= y1) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const landmOffset = bestIndex * 10;
   const rightEye = decodeLandmark(landms, landmOffset, priorCx, priorCy, priorW, priorH, targetWidth, targetHeight);
   const leftEye = decodeLandmark(landms, landmOffset + 2, priorCx, priorCy, priorW, priorH, targetWidth, targetHeight);
   if (!isFinitePoint(rightEye) || !isFinitePoint(leftEye)) {
-    return { head: null, eyes: [] };
+    return { head: null, eyes: [], mouth: null };
   }
 
   const head: Detection = { classId: HEAD_CLASS_ID, score: bestScore, x1, y1, x2, y2 };
@@ -445,7 +478,7 @@ export function parseRetinaFaceRawOutput(
   const eyes = [eyeDetection(leftEye, eyeBoxSize, bestScore), eyeDetection(rightEye, eyeBoxSize, bestScore)].sort(
     (a, b) => center(a)[0] - center(b)[0]
   );
-  return { head, eyes };
+  return { head, eyes, mouth: null };
 }
 
 function decodeLandmark(
@@ -572,6 +605,50 @@ function selectEyePair(head: Detection, eyes: Detection[]): Detection[] {
     }
   }
   return bestPair.sort((a, b) => center(a)[0] - center(b)[0]);
+}
+
+function selectBestInHead(head: Detection, detections: Detection[]): Detection | null {
+  const marginX = width(head) * 0.2;
+  const marginY = height(head) * 0.2;
+  const candidates = detections.filter((detection) => {
+    const [cx, cy] = center(detection);
+    return cx >= head.x1 - marginX && cx <= head.x2 + marginX && cy >= head.y1 - marginY && cy <= head.y2 + marginY;
+  });
+  if (candidates.length === 0) {
+    return null;
+  }
+  return candidates.reduce((best, candidate) => (candidate.score > best.score ? candidate : best), candidates[0]);
+}
+
+function forEachDetectionPixel(
+  frame: ImageData,
+  detection: Detection,
+  targetWidth: number,
+  targetHeight: number,
+  callback: (dstPixel: number, srcOffset: number) => void
+): void {
+  const crop = lipMotionCropDetection(frame, detection);
+  const x1 = crop.x1;
+  const y1 = crop.y1;
+  const x2 = crop.x2;
+  const y2 = crop.y2;
+  const cropWidth = x2 - x1;
+  const cropHeight = y2 - y1;
+  for (let y = 0; y < targetHeight; y += 1) {
+    const srcY = Math.min(y2 - 1, y1 + Math.floor(((y + 0.5) * cropHeight) / targetHeight));
+    for (let x = 0; x < targetWidth; x += 1) {
+      const srcX = Math.min(x2 - 1, x1 + Math.floor(((x + 0.5) * cropWidth) / targetWidth));
+      callback(y * targetWidth + x, (srcY * frame.width + srcX) * 4);
+    }
+  }
+}
+
+function lipMotionCropDetection(frame: ImageData, detection: Detection): Detection {
+  const x1 = clamp(Math.floor(detection.x1) - LIP_MOTION_MARGIN_LEFT, 0, frame.width - 1);
+  const y1 = clamp(Math.floor(detection.y1) - LIP_MOTION_MARGIN_TOP, 0, frame.height - 1);
+  const x2 = Math.max(x1 + 1, clamp(Math.ceil(detection.x2) + LIP_MOTION_MARGIN_RIGHT, 1, frame.width));
+  const y2 = Math.max(y1 + 1, clamp(Math.ceil(detection.y2) + LIP_MOTION_MARGIN_BOTTOM, 1, frame.height));
+  return { ...detection, x1, y1, x2, y2 };
 }
 
 function eyeDetection(point: [number, number], size: number, score: number): Detection {
@@ -1080,6 +1157,7 @@ export function createPreviewImage(
   frame: ImageData,
   head: Detection | null,
   eyes: Detection[],
+  mouth: Detection | null,
   message: string | null,
   widthRatio: number | null,
   gazeAngles?: [number, number]
@@ -1102,6 +1180,9 @@ export function createPreviewImage(
     sourceCtx.beginPath();
     sourceCtx.arc(cx, cy, 4, 0, Math.PI * 2);
     sourceCtx.fill();
+  }
+  if (mouth) {
+    drawBox(sourceCtx, lipMotionCropDetection(frame, mouth), "#ff8c00", "Mouth");
   }
   if (gazeAngles && eyes.length >= 2) {
     drawGazeLines(sourceCtx, eyes, gazeAngles[0], gazeAngles[1]);
