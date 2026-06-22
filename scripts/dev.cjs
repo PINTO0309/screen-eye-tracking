@@ -9,6 +9,7 @@ const binSuffix = process.platform === "win32" ? ".cmd" : "";
 const viteBin = path.join(repoRoot, "node_modules", ".bin", `vite${binSuffix}`);
 const electronBin = path.join(repoRoot, "node_modules", ".bin", `electron${binSuffix}`);
 const devServerUrl = "http://127.0.0.1:5173";
+const useShell = process.platform === "win32";
 
 let vite = null;
 let electronStarted = false;
@@ -48,10 +49,16 @@ function startElectron() {
   const electron = spawn(electronBin, [".", ...args], {
     cwd: repoRoot,
     stdio: "inherit",
+    shell: useShell,
     env: {
       ...process.env,
       VITE_DEV_SERVER_URL: devServerUrl
     }
+  });
+  electron.on("error", (error) => {
+    console.error(`Failed to start Electron: ${error.message}`);
+    vite?.kill();
+    process.exit(1);
   });
   electron.on("exit", (code) => {
     vite?.kill();
@@ -73,7 +80,13 @@ async function main() {
 
   vite = spawn(viteBin, ["--host", "127.0.0.1", "--port", "5173", "--strictPort"], {
     cwd: repoRoot,
-    stdio: "inherit"
+    stdio: "inherit",
+    shell: useShell
+  });
+
+  vite.on("error", (error) => {
+    console.error(`Failed to start Vite: ${error.message}`);
+    process.exit(1);
   });
 
   vite.on("exit", (code) => {
