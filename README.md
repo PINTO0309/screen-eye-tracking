@@ -83,25 +83,30 @@ An archive of CoreML models is also available from the same release, but I don't
 
 ## Run
 
+- `display-size-inch = diagonal length (cm) / 2.54`
+- The diagonal length does not include the bezel.
+
+  <img width="600" alt="inches" src="https://github.com/user-attachments/assets/e3b3e637-283e-4d3c-ab08-72ada5e950af" />
+
 ### 1. Python ver
 
 The default ONNX Runtime backend is TensorRT. If TensorRT is unavailable, the backend emits a warning and falls back to CUDA, then CPU.
 
 ```bash
 # Recommended
-pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-screen
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-screen --display-size-inch 31.5
 # Selecting the gaze estimation mode
-pnpm dev -- --backend cuda --calibrate
-pnpm dev -- --backend cuda --calibrate --gaze-projection-mode legacy
-pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-screen
-pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-convergence
+pnpm dev -- --backend cuda --calibrate --display-size-inch 31.5
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode legacy --display-size-inch 31.5
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-screen --display-size-inch 31.5
+pnpm dev -- --backend cuda --calibrate --gaze-projection-mode binocular-convergence --display-size-inch 31.5
 ```
 
 To explicitly use TensorRT or CPU:
 
 ```bash
-pnpm dev -- --backend tensorrt --calibrate
-pnpm dev -- --backend cpu --calibrate
+pnpm dev -- --backend tensorrt --calibrate --display-size-inch 31.5
+pnpm dev -- --backend cpu --calibrate --display-size-inch 31.5
 ```
 
 ### 2. Web component only ver (Python independent)
@@ -110,9 +115,9 @@ To run inference fully in Electron without starting Python:
 
 ```bash
 # onnxruntime-web
-pnpm dev -- --runtime onnxweb --calibrate --gaze-projection-mode binocular-screen
+pnpm dev -- --runtime onnxweb --calibrate --gaze-projection-mode binocular-screen --display-size-inch 31.5
 # LiteRT.js
-pnpm dev -- --runtime litert --calibrate --gaze-projection-mode binocular-screen
+pnpm dev -- --runtime litert --calibrate --gaze-projection-mode binocular-screen --display-size-inch 31.5
 ```
 
 The web runtimes try WebGPU first. If model loading fails, they reload both models with wasm.
