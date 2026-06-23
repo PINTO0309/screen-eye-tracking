@@ -80,6 +80,8 @@ An archive of CoreML models is also available from the same release, but I don't
 
 - [coreml_retinaface.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_retinaface.tar.gz)
 - [coreml_gaze.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_gaze.tar.gz)
+- [coreml_yolo.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_yolo.tar.gz)
+- [coreml_vsdlm_l.tar.gz](https://github.com/PINTO0309/screen-eye-tracking/releases/download/onnx/coreml_vsdlm_l.tar.gz)
 
 ## Run
 
